@@ -329,11 +329,12 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
         # Training - extract model performance only
         elif tool_name == "train_baseline_models":
             models = result.get("models", {})
-            best = result.get("best_model")
+            best = result.get("best_model", {})
+            best_name = best.get("name") if isinstance(best, dict) else best
             summary.update({
-                "best_model": best,
+                "best_model": best_name,
+                "best_score": best.get("score") if isinstance(best, dict) else None,
                 "models_trained": list(models.keys()),
-                "best_score": models.get(best, {}).get("test_metrics", {}).get("r2" if result.get("task_type") == "regression" else "accuracy"),
                 "task_type": result.get("task_type")
             })
         
