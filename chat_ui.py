@@ -126,7 +126,7 @@ def analyze_dataset(file, user_message, history):
                     agent_response = agent.analyze(
                         file_path=current_file,
                         task_description=user_message,
-                        use_cache=True,
+                        use_cache=False,  # Disable cache to avoid dict hashing issues
                         stream=False
                     )
                     

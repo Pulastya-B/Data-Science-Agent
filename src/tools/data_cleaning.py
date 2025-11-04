@@ -29,15 +29,16 @@ from utils.validation import (
 )
 
 
-def clean_missing_values(file_path: str, strategy: Dict[str, str], 
+def clean_missing_values(file_path: str, strategy, 
                         output_path: str) -> Dict[str, Any]:
     """
     Handle missing values using appropriate strategies.
     
     Args:
         file_path: Path to CSV or Parquet file
-        strategy: Dictionary mapping column names to strategies 
-                 ('median', 'mean', 'mode', 'forward_fill', 'drop', 'auto')
+        strategy: Either "auto" (string) to automatically decide strategies for all columns,
+                 or a dictionary mapping column names to strategies 
+                 ('median', 'mean', 'mode', 'forward_fill', 'drop')
         output_path: Path to save cleaned dataset
         
     Returns:
@@ -55,6 +56,21 @@ def clean_missing_values(file_path: str, strategy: Dict[str, str],
     numeric_cols = get_numeric_columns(df)
     categorical_cols = get_categorical_columns(df)
     id_cols = detect_id_columns(df)
+    
+    # Handle "auto" mode - automatically decide strategy for all columns with missing values
+    if isinstance(strategy, str) and strategy == "auto":
+        strategy = {}
+        for col in df.columns:
+            if df[col].null_count() > 0:
+                if col in id_cols:
+                    strategy[col] = "drop"
+                elif col in numeric_cols:
+                    strategy[col] = "median"
+                elif col in categorical_cols:
+                    strategy[col] = "mode"
+                else:
+                    strategy[col] = "drop"
+        print(f"🔧 Auto-detected strategies for {len(strategy)} columns with missing values")
     
     report = {
         "original_rows": len(df),

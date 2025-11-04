@@ -16,12 +16,13 @@ warnings.filterwarnings('ignore')
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from statsmodels.tsa.seasonal import seasonal_decompose, STL
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from prophet import Prophet
+# Lazy imports - only import when needed to avoid blocking app startup
+# from statsmodels.tsa.arima.model import ARIMA
+# from statsmodels.tsa.statespace.sarimax import SARIMAX
+# from statsmodels.tsa.holtwinters import ExponentialSmoothing
+# from statsmodels.tsa.seasonal import seasonal_decompose, STL
+# from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+# from prophet import Prophet
 import pandas as pd
 
 from utils.polars_helpers import load_dataframe, save_dataframe
@@ -60,6 +61,21 @@ def forecast_time_series(
     
     # Sort by time
     df = df.sort(time_col)
+    
+    # Lazy import of time series libraries
+    try:
+        if method == "prophet":
+            from prophet import Prophet
+        elif method in ["arima", "sarima"]:
+            from statsmodels.tsa.arima.model import ARIMA
+            from statsmodels.tsa.statespace.sarimax import SARIMAX
+        elif method == "exponential_smoothing":
+            from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    except ImportError as e:
+        return {
+            'status': 'error',
+            'message': f"Required library not installed for {method}: {str(e)}"
+        }
     
     print(f"📈 Forecasting with {method} (horizon={forecast_horizon})...")
     
@@ -200,6 +216,18 @@ def detect_seasonality_trends(
     
     # Sort by time
     df = df.sort(time_col)
+    
+    # Lazy import of time series libraries
+    try:
+        if method == "stl":
+            from statsmodels.tsa.seasonal import STL
+        else:
+            from statsmodels.tsa.seasonal import seasonal_decompose
+    except ImportError as e:
+        return {
+            'status': 'error',
+            'message': f"Required library not installed: {str(e)}"
+        }
     
     print(f"🔍 Detecting seasonality and trends using {method}...")
     

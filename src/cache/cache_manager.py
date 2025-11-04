@@ -39,27 +39,61 @@ class CacheManager:
     
     def _init_db(self) -> None:
         """Create cache table if it doesn't exist."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS cache (
-                key TEXT PRIMARY KEY,
-                value BLOB NOT NULL,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                metadata TEXT
-            )
-        """)
-        
-        # Create index on expires_at for efficient cleanup
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_expires_at 
-            ON cache(expires_at)
-        """)
-        
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cache (
+                    key TEXT PRIMARY KEY,
+                    value BLOB NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    metadata TEXT
+                )
+            """)
+            
+            # Create index on expires_at for efficient cleanup
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_expires_at 
+                ON cache(expires_at)
+            """)
+            
+            conn.commit()
+            conn.close()
+            print(f"✅ Cache database initialized at {self.db_path}")
+        except Exception as e:
+            print(f"⚠️ Error initializing cache database: {e}")
+            print(f"   Attempting to recreate database...")
+            try:
+                # Remove corrupted database and recreate
+                if self.db_path.exists():
+                    self.db_path.unlink()
+                
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    CREATE TABLE cache (
+                        key TEXT PRIMARY KEY,
+                        value BLOB NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        expires_at INTEGER NOT NULL,
+                        metadata TEXT
+                    )
+                """)
+                
+                cursor.execute("""
+                    CREATE INDEX idx_expires_at 
+                    ON cache(expires_at)
+                """)
+                
+                conn.commit()
+                conn.close()
+                print(f"✅ Cache database recreated successfully")
+            except Exception as e2:
+                print(f"❌ Failed to recreate cache database: {e2}")
+                print(f"   Cache functionality will be disabled")
     
     def _generate_key(self, *args, **kwargs) -> str:
         """
@@ -86,19 +120,28 @@ class CacheManager:
         Returns:
             Cached value if exists and not expired, None otherwise
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        current_time = int(time.time())
-        
-        cursor.execute("""
-            SELECT value, expires_at 
-            FROM cache 
-            WHERE key = ? AND expires_at > ?
-        """, (key, current_time))
-        
-        result = cursor.fetchone()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            current_time = int(time.time())
+            
+            cursor.execute("""
+                SELECT value, expires_at 
+                FROM cache 
+                WHERE key = ? AND expires_at > ?
+            """, (key, current_time))
+            
+            result = cursor.fetchone()
+            conn.close()
+        except sqlite3.OperationalError as e:
+            print(f"⚠️ Cache read error: {e}")
+            print(f"   Reinitializing cache database...")
+            self._init_db()
+            return None
+        except Exception as e:
+            print(f"⚠️ Unexpected cache error: {e}")
+            return None
         
         if result:
             value_blob, expires_at = result
@@ -118,26 +161,33 @@ class CacheManager:
             ttl_override: Optional override for TTL (seconds)
             metadata: Optional metadata to store with cache entry
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        current_time = int(time.time())
-        ttl = ttl_override if ttl_override is not None else self.ttl_seconds
-        expires_at = current_time + ttl
-        
-        # Serialize value using pickle
-        value_blob = pickle.dumps(value)
-        
-        # Serialize metadata as JSON
-        metadata_json = json.dumps(metadata) if metadata else None
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO cache (key, value, created_at, expires_at, metadata)
-            VALUES (?, ?, ?, ?, ?)
-        """, (key, value_blob, current_time, expires_at, metadata_json))
-        
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            current_time = int(time.time())
+            ttl = ttl_override if ttl_override is not None else self.ttl_seconds
+            expires_at = current_time + ttl
+            
+            # Serialize value using pickle
+            value_blob = pickle.dumps(value)
+            
+            # Serialize metadata as JSON
+            metadata_json = json.dumps(metadata) if metadata else None
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO cache (key, value, created_at, expires_at, metadata)
+                VALUES (?, ?, ?, ?, ?)
+            """, (key, value_blob, current_time, expires_at, metadata_json))
+            
+            conn.commit()
+            conn.close()
+        except sqlite3.OperationalError as e:
+            print(f"⚠️ Cache write error: {e}")
+            print(f"   Reinitializing cache database...")
+            self._init_db()
+        except Exception as e:
+            print(f"⚠️ Unexpected cache error during write: {e}")
     
     def invalidate(self, key: str) -> bool:
         """

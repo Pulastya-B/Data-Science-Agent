@@ -1,10 +1,14 @@
 """
-Tools Registry for Groq Function Calling
+Complete Tools Registry for Groq Function Calling - All 44 Tools
 Defines all available tools in Groq's function calling format.
 """
 
 TOOLS = [
-    # Data Profiling Tools
+    # ============================================
+    # BASIC TOOLS (10)
+    # ============================================
+    
+    # Data Profiling Tools (3)
     {
         "type": "function",
         "function": {
@@ -61,7 +65,7 @@ TOOLS = [
         }
     },
     
-    # Data Cleaning Tools
+    # Data Cleaning Tools (3)
     {
         "type": "function",
         "function": {
@@ -75,11 +79,19 @@ TOOLS = [
                         "description": "Path to the dataset file"
                     },
                     "strategy": {
-                        "type": "object",
-                        "description": "Dictionary mapping column names to strategies ('median', 'mean', 'mode', 'forward_fill', 'drop'). Use 'auto' to let the tool decide based on data type.",
-                        "additionalProperties": {
-                            "type": "string"
-                        }
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "enum": ["auto"],
+                                "description": "Use 'auto' to automatically decide strategies for all columns based on data type"
+                            },
+                            {
+                                "type": "object",
+                                "description": "Dictionary mapping column names to strategies ('median', 'mean', 'mode', 'forward_fill', 'drop')",
+                                "additionalProperties": {"type": "string"}
+                            }
+                        ],
+                        "description": "Either 'auto' (string) to automatically handle all missing values, or a dictionary mapping specific columns to strategies"
                     },
                     "output_path": {
                         "type": "string",
@@ -136,9 +148,7 @@ TOOLS = [
                     "type_mapping": {
                         "type": "object",
                         "description": "Optional dictionary mapping column names to target types ('int', 'float', 'string', 'date', 'bool', 'category'). Use 'auto' for automatic detection.",
-                        "additionalProperties": {
-                            "type": "string"
-                        }
+                        "additionalProperties": {"type": "string"}
                     },
                     "output_path": {
                         "type": "string",
@@ -150,7 +160,65 @@ TOOLS = [
         }
     },
     
-    # Feature Engineering Tools
+    # Data Type Conversion Tools (2)
+    {
+        "type": "function",
+        "function": {
+            "name": "force_numeric_conversion",
+            "description": "CRITICAL TOOL: Force convert columns to numeric type even if detected as strings/objects. Essential for datasets with numeric columns stored as strings (with commas, spaces, currency symbols). Use this BEFORE encoding when you see 'no numeric features' errors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the dataset file"
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of column names to force convert to numeric. Use ['all'] to auto-detect and convert all non-ID columns that look numeric."
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Path to save dataset with converted types"
+                    },
+                    "errors": {
+                        "type": "string",
+                        "enum": ["coerce", "raise"],
+                        "description": "How to handle conversion errors. 'coerce' makes invalid values null (recommended), 'raise' throws error."
+                    }
+                },
+                "required": ["file_path", "columns", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "smart_type_inference",
+            "description": "Intelligently infer and fix data types for all columns by analyzing patterns. Goes beyond basic type detection to understand semantic meaning. Use when dataset has widespread type issues.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the dataset file"
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Path to save dataset with inferred types"
+                    },
+                    "aggressive": {
+                        "type": "boolean",
+                        "description": "If true, attempts aggressive conversion on ambiguous columns. Recommended for messy datasets."
+                    }
+                },
+                "required": ["file_path", "output_path"]
+            }
+        }
+    },
+    
+    # Feature Engineering Tools (2)
     {
         "type": "function",
         "function": {
@@ -190,7 +258,7 @@ TOOLS = [
                     },
                     "method": {
                         "type": "string",
-                        "enum": ["one_hot", "target", "frequency"],
+                        "enum": ["one_hot", "target", "frequency", "auto"],
                         "description": "Encoding method to use"
                     },
                     "columns": {
@@ -212,7 +280,7 @@ TOOLS = [
         }
     },
     
-    # Model Training Tools
+    # Model Training Tools (2)
     {
         "type": "function",
         "function": {
@@ -275,35 +343,666 @@ TOOLS = [
                 "required": ["model_path", "test_data_path", "target_col", "output_path"]
             }
         }
+    },
+    
+    # ============================================
+    # ADVANCED ANALYSIS TOOLS (5)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_eda_analysis",
+            "description": "Comprehensive Exploratory Data Analysis with visualizations, distribution analysis, and automated insights. Generates HTML report with plots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Optional target column for supervised analysis"},
+                    "output_dir": {"type": "string", "description": "Directory to save EDA report and plots"}
+                },
+                "required": ["file_path", "output_dir"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_model_issues",
+            "description": "Detect overfitting, underfitting, class imbalance, and other model performance issues. Provides diagnostic recommendations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_path": {"type": "string", "description": "Path to trained model"},
+                    "train_data_path": {"type": "string", "description": "Path to training data"},
+                    "test_data_path": {"type": "string", "description": "Path to test data"},
+                    "target_col": {"type": "string", "description": "Target column name"}
+                },
+                "required": ["model_path", "train_data_path", "test_data_path", "target_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_anomalies",
+            "description": "Detect anomalies using Isolation Forest, LOF, or statistical methods. Returns anomaly scores and flags.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "method": {"type": "string", "enum": ["isolation_forest", "lof", "statistical"], "description": "Anomaly detection method"},
+                    "contamination": {"type": "number", "description": "Expected proportion of anomalies (default: 0.1)"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with anomaly scores"}
+                },
+                "required": ["file_path", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_and_handle_multicollinearity",
+            "description": "Detect and handle multicollinearity using VIF (Variance Inflation Factor). Removes highly correlated features automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "threshold": {"type": "number", "description": "VIF threshold (default: 10)"},
+                    "method": {"type": "string", "enum": ["drop", "combine"], "description": "How to handle correlated features"},
+                    "output_path": {"type": "string", "description": "Path to save cleaned dataset"}
+                },
+                "required": ["file_path", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_statistical_tests",
+            "description": "Perform statistical hypothesis tests (t-test, chi-square, ANOVA) to analyze relationships between features and target.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "test_type": {"type": "string", "enum": ["auto", "ttest", "chi2", "anova"], "description": "Type of statistical test"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    
+    # ============================================
+    # ADVANCED FEATURE ENGINEERING (4)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "create_interaction_features",
+            "description": "Create polynomial, PCA, or cross-product interaction features to capture non-linear relationships.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "method": {"type": "string", "enum": ["polynomial", "pca", "cross"], "description": "Interaction method"},
+                    "degree": {"type": "integer", "description": "Polynomial degree (default: 2)"},
+                    "max_features": {"type": "integer", "description": "Maximum new features to create (default: 50)"},
+                    "output_path": {"type": "string", "description": "Path to save enhanced dataset"}
+                },
+                "required": ["file_path", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_aggregation_features",
+            "description": "Create aggregation features (mean, sum, count, etc.) grouped by categorical columns. Useful for customer/transaction data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "group_cols": {"type": "array", "items": {"type": "string"}, "description": "Columns to group by"},
+                    "agg_cols": {"type": "array", "items": {"type": "string"}, "description": "Columns to aggregate"},
+                    "agg_functions": {"type": "array", "items": {"type": "string"}, "description": "Aggregation functions (mean, sum, count, etc.)"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with aggregations"}
+                },
+                "required": ["file_path", "group_cols", "agg_cols", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "engineer_text_features",
+            "description": "Extract features from text columns: TF-IDF, word counts, sentiment, readability scores, and embeddings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "text_col": {"type": "string", "description": "Text column name"},
+                    "methods": {"type": "array", "items": {"type": "string"}, "description": "Feature extraction methods (tfidf, count, sentiment, readability)"},
+                    "max_features": {"type": "integer", "description": "Max TF-IDF features (default: 100)"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with text features"}
+                },
+                "required": ["file_path", "text_col", "methods", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_feature_engineering",
+            "description": "Automatically engineer features using genetic programming (TPOT) or feature tools. Creates best feature combinations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "max_features": {"type": "integer", "description": "Maximum features to generate (default: 20)"},
+                    "time_budget": {"type": "integer", "description": "Time budget in minutes (default: 10)"},
+                    "output_path": {"type": "string", "description": "Path to save enhanced dataset"}
+                },
+                "required": ["file_path", "target_col", "output_path"]
+            }
+        }
+    },
+    
+    # ============================================
+    # ADVANCED PREPROCESSING (3)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "handle_imbalanced_data",
+            "description": "Handle class imbalance using SMOTE, ADASYN, or class weights. Critical for classification tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "method": {"type": "string", "enum": ["smote", "adasyn", "random_oversample", "random_undersample"], "description": "Balancing method"},
+                    "sampling_strategy": {"type": "string", "description": "Sampling ratio (auto, minority, majority)"},
+                    "output_path": {"type": "string", "description": "Path to save balanced dataset"}
+                },
+                "required": ["file_path", "target_col", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_feature_scaling",
+            "description": "Scale features using StandardScaler, MinMaxScaler, or RobustScaler. Essential for distance-based algorithms.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "method": {"type": "string", "enum": ["standard", "minmax", "robust"], "description": "Scaling method"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "Columns to scale (None = all numeric)"},
+                    "output_path": {"type": "string", "description": "Path to save scaled dataset"}
+                },
+                "required": ["file_path", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "split_data_strategically",
+            "description": "Split data with stratification, time-based splitting, or group-based splitting for better validation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column for stratification"},
+                    "method": {"type": "string", "enum": ["stratified", "time_based", "group_based"], "description": "Split method"},
+                    "test_size": {"type": "number", "description": "Test set proportion (default: 0.2)"},
+                    "time_col": {"type": "string", "description": "Time column for time-based split"},
+                    "group_col": {"type": "string", "description": "Group column for group-based split"}
+                },
+                "required": ["file_path", "method"]
+            }
+        }
+    },
+    
+    # ============================================
+    # ADVANCED TRAINING (3)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "hyperparameter_tuning",
+            "description": "Optimize model hyperparameters using Optuna (Bayesian optimization). Finds best model configuration automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to prepared dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "model_type": {"type": "string", "enum": ["random_forest", "xgboost", "lightgbm"], "description": "Model to tune"},
+                    "n_trials": {"type": "integer", "description": "Number of tuning trials (default: 100)"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "ML task type"},
+                    "output_path": {"type": "string", "description": "Path to save tuned model"}
+                },
+                "required": ["file_path", "target_col", "model_type", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "train_ensemble_models",
+            "description": "Train ensemble models using stacking, voting, or blending. Combines multiple models for better performance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to prepared dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "ensemble_method": {"type": "string", "enum": ["stacking", "voting", "blending"], "description": "Ensemble technique"},
+                    "base_models": {"type": "array", "items": {"type": "string"}, "description": "Base model types to ensemble"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "ML task type"},
+                    "output_path": {"type": "string", "description": "Path to save ensemble model"}
+                },
+                "required": ["file_path", "target_col", "ensemble_method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_cross_validation",
+            "description": "Perform k-fold cross-validation to get robust model performance estimates. Returns mean and std of metrics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "model_type": {"type": "string", "description": "Model type (random_forest, xgboost, etc.)"},
+                    "n_folds": {"type": "integer", "description": "Number of CV folds (default: 5)"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "ML task type"}
+                },
+                "required": ["file_path", "target_col", "model_type"]
+            }
+        }
+    },
+    
+    # ============================================
+    # BUSINESS INTELLIGENCE (4)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_cohort_analysis",
+            "description": "Analyze user cohorts over time (retention, revenue, engagement). Essential for SaaS and e-commerce businesses.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to transaction/event data"},
+                    "user_col": {"type": "string", "description": "User ID column"},
+                    "date_col": {"type": "string", "description": "Date/timestamp column"},
+                    "metric_col": {"type": "string", "description": "Metric to analyze (revenue, events, etc.)"},
+                    "cohort_period": {"type": "string", "enum": ["daily", "weekly", "monthly"], "description": "Cohort grouping period"},
+                    "output_path": {"type": "string", "description": "Path to save cohort analysis results"}
+                },
+                "required": ["file_path", "user_col", "date_col", "metric_col", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_rfm_analysis",
+            "description": "RFM (Recency, Frequency, Monetary) analysis for customer segmentation. Identifies best/worst customers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to transaction data"},
+                    "customer_col": {"type": "string", "description": "Customer ID column"},
+                    "date_col": {"type": "string", "description": "Transaction date column"},
+                    "amount_col": {"type": "string", "description": "Transaction amount column"},
+                    "output_path": {"type": "string", "description": "Path to save RFM segments"}
+                },
+                "required": ["file_path", "customer_col", "date_col", "amount_col", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_causal_relationships",
+            "description": "Detect potential causal relationships between features using Granger causality and correlation analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target/effect column"},
+                    "feature_cols": {"type": "array", "items": {"type": "string"}, "description": "Potential cause columns"},
+                    "method": {"type": "string", "enum": ["granger", "correlation"], "description": "Causality detection method"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_business_insights",
+            "description": "Generate automated business insights using descriptive statistics, trends, and anomaly detection. Creates executive summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to business data"},
+                    "metric_cols": {"type": "array", "items": {"type": "string"}, "description": "Key business metrics to analyze"},
+                    "date_col": {"type": "string", "description": "Date column for trend analysis"},
+                    "output_path": {"type": "string", "description": "Path to save insights report"}
+                },
+                "required": ["file_path", "metric_cols", "output_path"]
+            }
+        }
+    },
+    
+    # ============================================
+    # COMPUTER VISION (3)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_image_features",
+            "description": "Extract features from images using pre-trained CNNs (ResNet, VGG). Converts images to feature vectors for ML.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_dir": {"type": "string", "description": "Directory containing images"},
+                    "model": {"type": "string", "enum": ["resnet", "vgg", "mobilenet"], "description": "Pre-trained model to use"},
+                    "output_path": {"type": "string", "description": "Path to save feature vectors CSV"}
+                },
+                "required": ["image_dir", "model", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_image_clustering",
+            "description": "Cluster images based on visual similarity using K-means or DBSCAN on extracted features.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_dir": {"type": "string", "description": "Directory containing images"},
+                    "n_clusters": {"type": "integer", "description": "Number of clusters (default: auto-detect)"},
+                    "method": {"type": "string", "enum": ["kmeans", "dbscan"], "description": "Clustering method"},
+                    "output_path": {"type": "string", "description": "Path to save clustering results"}
+                },
+                "required": ["image_dir", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_tabular_image_hybrid",
+            "description": "Combine tabular data with image features for hybrid ML models. Useful for e-commerce/medical data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tabular_path": {"type": "string", "description": "Path to tabular data CSV"},
+                    "image_dir": {"type": "string", "description": "Directory with images"},
+                    "image_id_col": {"type": "string", "description": "Column linking tabular data to images"},
+                    "output_path": {"type": "string", "description": "Path to save combined features"}
+                },
+                "required": ["tabular_path", "image_dir", "image_id_col", "output_path"]
+            }
+        }
+    },
+    
+    # ============================================
+    # NLP/TEXT ANALYTICS (4)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_topic_modeling",
+            "description": "Discover topics in text documents using LDA or NMF. Extract themes from customer reviews, articles, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset with text"},
+                    "text_col": {"type": "string", "description": "Text column name"},
+                    "n_topics": {"type": "integer", "description": "Number of topics to extract (default: 5)"},
+                    "method": {"type": "string", "enum": ["lda", "nmf"], "description": "Topic modeling method"},
+                    "output_path": {"type": "string", "description": "Path to save topics and document-topic matrix"}
+                },
+                "required": ["file_path", "text_col", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_named_entity_recognition",
+            "description": "Extract named entities (person, organization, location) from text using NER models.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset with text"},
+                    "text_col": {"type": "string", "description": "Text column name"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with extracted entities"}
+                },
+                "required": ["file_path", "text_col", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_sentiment_advanced",
+            "description": "Perform advanced sentiment analysis with aspect-based sentiment (what features customers like/dislike).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset with text"},
+                    "text_col": {"type": "string", "description": "Text column name"},
+                    "aspects": {"type": "array", "items": {"type": "string"}, "description": "Aspects to analyze sentiment for (e.g., 'price', 'quality')"},
+                    "output_path": {"type": "string", "description": "Path to save sentiment scores"}
+                },
+                "required": ["file_path", "text_col", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_text_similarity",
+            "description": "Calculate text similarity using cosine similarity, Jaccard, or semantic embeddings. Find duplicate/similar documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset with text"},
+                    "text_col": {"type": "string", "description": "Text column name"},
+                    "method": {"type": "string", "enum": ["cosine", "jaccard", "semantic"], "description": "Similarity method"},
+                    "threshold": {"type": "number", "description": "Similarity threshold (0-1)"},
+                    "output_path": {"type": "string", "description": "Path to save similarity matrix"}
+                },
+                "required": ["file_path", "text_col", "method", "output_path"]
+            }
+        }
+    },
+    
+    # ============================================
+    # PRODUCTION/MLOPS (5)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "monitor_model_drift",
+            "description": "Detect data drift and concept drift in production models. Compare training vs production data distributions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "train_data_path": {"type": "string", "description": "Path to original training data"},
+                    "production_data_path": {"type": "string", "description": "Path to recent production data"},
+                    "features": {"type": "array", "items": {"type": "string"}, "description": "Features to monitor for drift"},
+                    "output_path": {"type": "string", "description": "Path to save drift report"}
+                },
+                "required": ["train_data_path", "production_data_path", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_predictions",
+            "description": "Explain model predictions using SHAP or LIME. Generate feature importance explanations for individual predictions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_path": {"type": "string", "description": "Path to trained model"},
+                    "data_path": {"type": "string", "description": "Path to data to explain"},
+                    "method": {"type": "string", "enum": ["shap", "lime"], "description": "Explanation method"},
+                    "n_samples": {"type": "integer", "description": "Number of samples to explain (default: 10)"},
+                    "output_path": {"type": "string", "description": "Path to save explanations"}
+                },
+                "required": ["model_path", "data_path", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_model_card",
+            "description": "Generate model card documentation with model details, performance metrics, bias analysis, and usage guidelines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_path": {"type": "string", "description": "Path to trained model"},
+                    "train_data_path": {"type": "string", "description": "Path to training data"},
+                    "test_data_path": {"type": "string", "description": "Path to test data"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "output_path": {"type": "string", "description": "Path to save model card JSON"}
+                },
+                "required": ["model_path", "train_data_path", "test_data_path", "target_col", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_ab_test_analysis",
+            "description": "Analyze A/B test results with statistical significance testing. Determine if variant B is better than control A.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to A/B test data"},
+                    "variant_col": {"type": "string", "description": "Column indicating variant (A/B)"},
+                    "metric_col": {"type": "string", "description": "Success metric column"},
+                    "confidence_level": {"type": "number", "description": "Confidence level for significance (default: 0.95)"}
+                },
+                "required": ["file_path", "variant_col", "metric_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_feature_leakage",
+            "description": "Detect potential feature leakage by analyzing feature importance and temporal relationships. Prevents data leakage bugs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "date_col": {"type": "string", "description": "Optional date column for temporal analysis"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    
+    # ============================================
+    # TIME SERIES (3)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "forecast_time_series",
+            "description": "Forecast future values using ARIMA, Prophet, or LSTM models. Handles seasonal and trend components.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to time series data"},
+                    "date_col": {"type": "string", "description": "Date/timestamp column"},
+                    "value_col": {"type": "string", "description": "Value column to forecast"},
+                    "forecast_periods": {"type": "integer", "description": "Number of periods to forecast"},
+                    "method": {"type": "string", "enum": ["arima", "prophet", "lstm"], "description": "Forecasting method"},
+                    "output_path": {"type": "string", "description": "Path to save forecast results"}
+                },
+                "required": ["file_path", "date_col", "value_col", "forecast_periods", "method", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_seasonality_trends",
+            "description": "Detect seasonality patterns and trends in time series data using STL decomposition and statistical tests.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to time series data"},
+                    "date_col": {"type": "string", "description": "Date/timestamp column"},
+                    "value_col": {"type": "string", "description": "Value column to analyze"},
+                    "period": {"type": "integer", "description": "Expected seasonal period (e.g., 12 for monthly)"}
+                },
+                "required": ["file_path", "date_col", "value_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_time_series_features",
+            "description": "Create comprehensive time series features: lags, rolling stats, exponential moving averages, and Fourier features.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to time series data"},
+                    "date_col": {"type": "string", "description": "Date/timestamp column"},
+                    "value_col": {"type": "string", "description": "Value column"},
+                    "lags": {"type": "array", "items": {"type": "integer"}, "description": "Lag periods to create (e.g., [1, 7, 30])"},
+                    "windows": {"type": "array", "items": {"type": "integer"}, "description": "Rolling window sizes (e.g., [7, 30])"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with time series features"}
+                },
+                "required": ["file_path", "date_col", "value_col", "output_path"]
+            }
+        }
     }
 ]
 
 
 def get_tool_by_name(tool_name: str) -> dict:
-    """
-    Get tool definition by name.
-    
-    Args:
-        tool_name: Name of the tool
-        
-    Returns:
-        Tool definition dictionary
-        
-    Raises:
-        ValueError: If tool not found
-    """
+    """Get tool definition by name."""
     for tool in TOOLS:
         if tool["function"]["name"] == tool_name:
             return tool
-    
     raise ValueError(f"Tool '{tool_name}' not found in registry")
 
 
 def get_all_tool_names() -> list:
-    """
-    Get list of all tool names.
-    
-    Returns:
-        List of tool names
-    """
+    """Get list of all tool names."""
     return [tool["function"]["name"] for tool in TOOLS]
+
+
+def get_tools_by_category() -> dict:
+    """Get tools organized by category."""
+    return {
+        "basic": [t["function"]["name"] for t in TOOLS[:10]],
+        "advanced_analysis": [t["function"]["name"] for t in TOOLS[10:15]],
+        "advanced_feature_engineering": [t["function"]["name"] for t in TOOLS[15:19]],
+        "advanced_preprocessing": [t["function"]["name"] for t in TOOLS[19:22]],
+        "advanced_training": [t["function"]["name"] for t in TOOLS[22:25]],
+        "business_intelligence": [t["function"]["name"] for t in TOOLS[25:29]],
+        "computer_vision": [t["function"]["name"] for t in TOOLS[29:32]],
+        "nlp_text_analytics": [t["function"]["name"] for t in TOOLS[32:36]],
+        "production_mlops": [t["function"]["name"] for t in TOOLS[36:41]],
+        "time_series": [t["function"]["name"] for t in TOOLS[41:44]]
+    }
