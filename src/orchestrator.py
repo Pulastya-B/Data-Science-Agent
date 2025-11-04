@@ -466,17 +466,44 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     print(f"📊 Pruned conversation history (keeping last 8 messages)")
                 
                 # Use compressed tools registry (all 46 tools but shorter descriptions)
-                tools_to_use = self._compress_tools_registry()
+                try:
+                    print(f"[DEBUG] Before _compress_tools_registry()")
+                    tools_to_use = self._compress_tools_registry()
+                    print(f"[DEBUG] After _compress_tools_registry(), tools count: {len(tools_to_use)}")
+                    print(f"[DEBUG]   First tool type: {type(tools_to_use[0])}")
+                except TypeError as e:
+                    if "unhashable" in str(e):
+                        print(f"❌ ERROR in _compress_tools_registry(): {e}")
+                        import traceback
+                        traceback.print_exc()
+                    raise
                 
                 # Call Groq with function calling
-                response = self.groq_client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=tools_to_use,
-                    tool_choice="auto",
-                    temperature=0.1,  # Low temperature for consistent outputs
-                    max_tokens=4096
-                )
+                try:
+                    print(f"[DEBUG] Before Groq API call")
+                    print(f"[DEBUG]   messages count: {len(messages)}")
+                    print(f"[DEBUG]   tools_to_use count: {len(tools_to_use)}")
+                    response = self.groq_client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        tools=tools_to_use,
+                        tool_choice="auto",
+                        temperature=0.1,  # Low temperature for consistent outputs
+                        max_tokens=4096
+                    )
+                    print(f"[DEBUG] After Groq API call - SUCCESS")
+                except TypeError as e:
+                    if "unhashable" in str(e):
+                        print(f"❌ ERROR in Groq API call: {e}")
+                        print(f"[DEBUG]   Checking messages for unhashable types:")
+                        for i, msg in enumerate(messages):
+                            print(f"     Message {i}: role={msg.get('role')}, type={type(msg)}")
+                        print(f"[DEBUG]   Checking tools for unhashable types:")
+                        for i, tool in enumerate(tools_to_use[:3]):  # Check first 3
+                            print(f"     Tool {i}: {tool.get('function', {}).get('name', 'unknown')}")
+                        import traceback
+                        traceback.print_exc()
+                    raise
                 
                 self.api_calls_made += 1
                 
@@ -507,7 +534,18 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     return result
                 
                 # Execute tool calls
-                messages.append(response_message)
+                try:
+                    print(f"[DEBUG] Before appending response_message")
+                    print(f"[DEBUG]   response_message type: {type(response_message)}")
+                    messages.append(response_message)
+                    print(f"[DEBUG] Successfully appended response_message")
+                except TypeError as e:
+                    if "unhashable" in str(e):
+                        print(f"❌ ERROR appending response_message: {e}")
+                        print(f"   response_message: {response_message}")
+                        import traceback
+                        traceback.print_exc()
+                    raise
                 
                 for tool_call in response_message.tool_calls:
                     tool_name = tool_call.function.name
@@ -520,20 +558,45 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     tool_result = self._execute_tool(tool_name, tool_args)
                     
                     # Track in workflow
-                    workflow_history.append({
-                        "iteration": iteration,
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "result": tool_result
-                    })
+                    try:
+                        print(f"[DEBUG] Before appending to workflow_history")
+                        workflow_history.append({
+                            "iteration": iteration,
+                            "tool": tool_name,
+                            "arguments": tool_args,
+                            "result": tool_result
+                        })
+                        print(f"[DEBUG] Successfully appended to workflow_history")
+                    except TypeError as e:
+                        if "unhashable" in str(e):
+                            print(f"❌ ERROR appending to workflow_history: {e}")
+                            print(f"   tool_result type: {type(tool_result)}")
+                            print(f"   tool_result keys: {tool_result.keys() if isinstance(tool_result, dict) else 'N/A'}")
+                            import traceback
+                            traceback.print_exc()
+                        raise
                     
                     # Add tool result to messages
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "content": self._format_tool_result(tool_result)
-                    })
+                    try:
+                        print(f"[DEBUG] Before appending tool result to messages")
+                        formatted_result = self._format_tool_result(tool_result)
+                        print(f"[DEBUG]   formatted_result type: {type(formatted_result)}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": tool_name,
+                            "content": formatted_result
+                        })
+                        print(f"[DEBUG] Successfully appended tool result to messages")
+                    except TypeError as e:
+                        if "unhashable" in str(e):
+                            print(f"❌ ERROR appending tool result to messages: {e}")
+                            print(f"   tool_call.id: {tool_call.id}")
+                            print(f"   tool_name: {tool_name}")
+                            print(f"   formatted_result: {formatted_result[:200]}")
+                            import traceback
+                            traceback.print_exc()
+                        raise
                     
                     print(f"   ✓ Completed: {tool_name}")
             

@@ -161,8 +161,12 @@ def analyze_dataset(file, user_message, history):
                     yield history, ""
                     return
                 except Exception as e:
+                    import sys
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
                     response = f"⚠️ **AI Agent Error:**\n\n"
-                    response += f"```\n{str(e)}\n{traceback.format_exc()}\n```\n\n"
+                    response += f"**Error Type:** {exc_type.__name__}\n\n"
+                    response += f"**Error Message:** {str(e)}\n\n"
+                    response += f"**Full Traceback:**\n```python\n{traceback.format_exc()}\n```\n\n"
                     response += "💡 **Fallback Options:**\n"
                     response += "- Use the **Quick Train** feature on the right\n"
                     response += "- Try manual commands: `profile`, `quality`, `columns`\n"
