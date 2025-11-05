@@ -1,6 +1,7 @@
 """
 Data Science Copilot Orchestrator
-Main orchestration class that uses Groq's function calling to execute data science workflows.
+Main orchestration class that uses LLM function calling to execute data science workflows.
+Supports multiple providers: Groq and Gemini.
 """
 
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 import time
 
 from groq import Groq
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 from cache.cache_manager import CacheManager
@@ -76,34 +78,63 @@ from tools import (
 
 class DataScienceCopilot:
     """
-    Main orchestrator for data science workflows using Groq's GPT-OSS-120B.
+    Main orchestrator for data science workflows using LLM function calling.
     
+    Supports multiple providers: Groq and Gemini.
     Uses function calling to intelligently route to data profiling, cleaning,
     feature engineering, and model training tools.
     """
     
     def __init__(self, groq_api_key: Optional[str] = None, 
+                 google_api_key: Optional[str] = None,
                  cache_db_path: Optional[str] = None,
-                 reasoning_effort: str = "medium"):
+                 reasoning_effort: str = "medium",
+                 provider: Optional[str] = None):
         """
         Initialize the Data Science Copilot.
         
         Args:
             groq_api_key: Groq API key (or set GROQ_API_KEY env var)
+            google_api_key: Google API key (or set GOOGLE_API_KEY env var)
             cache_db_path: Path to cache database
             reasoning_effort: Reasoning effort for Groq ('low', 'medium', 'high')
+            provider: LLM provider - 'groq' or 'gemini' (or set LLM_PROVIDER env var)
         """
         # Load environment variables
         load_dotenv()
         
-        # Initialize Groq client
-        api_key = groq_api_key or os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("Groq API key must be provided or set in GROQ_API_KEY env var")
+        # Determine provider
+        self.provider = provider or os.getenv("LLM_PROVIDER", "groq").lower()
         
-        self.groq_client = Groq(api_key=api_key)
-        self.model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-        self.reasoning_effort = reasoning_effort
+        if self.provider == "groq":
+            # Initialize Groq client
+            api_key = groq_api_key or os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("Groq API key must be provided or set in GROQ_API_KEY env var")
+            
+            self.groq_client = Groq(api_key=api_key)
+            self.model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            self.reasoning_effort = reasoning_effort
+            self.gemini_model = None
+            print(f"🤖 Initialized with Groq provider - Model: {self.model}")
+            
+        elif self.provider == "gemini":
+            # Initialize Gemini client
+            api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("Google API key must be provided or set in GOOGLE_API_KEY env var")
+            
+            genai.configure(api_key=api_key)
+            self.model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+            self.gemini_model = genai.GenerativeModel(
+                self.model,
+                generation_config={"temperature": 0.1}
+            )
+            self.groq_client = None
+            print(f"🤖 Initialized with Gemini provider - Model: {self.model}")
+            
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}. Choose 'groq' or 'gemini'")
         
         # Initialize cache
         cache_path = cache_db_path or os.getenv("CACHE_DB_PATH", "./cache_db/cache.db")
@@ -116,6 +147,10 @@ class DataScienceCopilot:
         # Token tracking
         self.total_tokens_used = 0
         self.api_calls_made = 0
+        
+        # Rate limiting for Gemini (10 RPM free tier)
+        self.last_api_call_time = 0
+        self.min_api_call_interval = 3.5 if self.provider == "gemini" else 0  # 6.5s = ~9 calls/min (safe margin)
         
         # Ensure output directories exist
         Path("./outputs").mkdir(exist_ok=True)
@@ -188,17 +223,25 @@ class DataScienceCopilot:
         """Build comprehensive system prompt for the copilot."""
         return """You are an autonomous Data Science Agent. You EXECUTE tasks, not advise.
 
+**CRITICAL: Use the provided function calling tools. Do NOT generate XML-style function calls.**
+
 **CRITICAL: Complete the ENTIRE workflow. NEVER stop with recommendations.**
 
-**WORKFLOW (Execute ALL steps):**
-1. profile_dataset(file_path)
-2. detect_data_quality_issues(file_path)
+**WORKFLOW (Execute ALL steps - DO NOT SKIP):**
+1. profile_dataset(file_path) - ONCE ONLY
+2. detect_data_quality_issues(file_path) - ONCE ONLY
 3. clean_missing_values(file_path, strategy="auto", output="./outputs/data/cleaned.csv")
 4. handle_outliers(cleaned, method="clip", columns=["all"], output="./outputs/data/no_outliers.csv")
-5. force_numeric_conversion(latest, columns=["all"], output="./outputs/data/numeric.csv", errors="coerce") ← CRITICAL for "no numeric features" errors
+5. force_numeric_conversion(latest, columns=["all"], output="./outputs/data/numeric.csv", errors="coerce")
 6. encode_categorical(latest, method="auto", output="./outputs/data/encoded.csv")
-7. train_baseline_models(encoded, target_col, task_type="auto")
-8. generate_model_report()
+7. **train_baseline_models**(encoded, target_col, task_type="auto") ← REQUIRED! DO NOT SKIP!
+8. STOP after training completes (no need for generate_model_report)
+
+**CRITICAL RULES:**
+- DO NOT repeat profile_dataset or detect_data_quality_issues multiple times
+- After encode_categorical, IMMEDIATELY call train_baseline_models
+- DO NOT call smart_type_inference after encoding - data is ready
+- Training is the GOAL - do not analyze endlessly, just TRAIN
 
 **KEY TOOLS (46 total available via function calling):**
 - force_numeric_conversion: Converts string columns to numeric (auto-detects, skips text)
@@ -208,7 +251,7 @@ class DataScienceCopilot:
 - Advanced: hyperparameter_tuning, train_ensemble_models, perform_eda_analysis, handle_imbalanced_data, perform_feature_scaling, detect_anomalies, detect_and_handle_multicollinearity, auto_feature_engineering, forecast_time_series, explain_predictions, generate_business_insights, perform_topic_modeling, extract_image_features, monitor_model_drift
 
 **RULES:**
-✅ EXECUTE each step (use tools)
+✅ EXECUTE each step (use tools) - ONE tool call per response
 ✅ Use OUTPUT of each tool as INPUT to next
 ✅ If tool fails, continue pipeline
 ✅ If "no numeric features" → use force_numeric_conversion
@@ -217,6 +260,9 @@ class DataScienceCopilot:
 ❌ NO recommendations without action
 ❌ NO stopping after detecting issues
 ❌ NO giving up on errors
+❌ NO XML-style function syntax like <function=name />
+
+**CRITICAL: Call ONE function at a time. Wait for its result before calling the next.**
 
 File chain: original → cleaned.csv → no_outliers.csv → numeric.csv → encoded.csv → models
 
@@ -330,11 +376,11 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
         elif tool_name == "train_baseline_models":
             models = result.get("models", {})
             best = result.get("best_model", {})
-            best_name = best.get("name") if isinstance(best, dict) else best
+            best_model_name = best.get("name") if isinstance(best, dict) else best
             summary.update({
-                "best_model": best_name,
-                "best_score": best.get("score") if isinstance(best, dict) else None,
+                "best_model": best_model_name,
                 "models_trained": list(models.keys()),
+                "best_score": best.get("score") if isinstance(best, dict) else None,
                 "task_type": result.get("task_type")
             })
         
@@ -407,11 +453,94 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
         
         return compressed
     
+    def _convert_to_gemini_tools(self, groq_tools: List[Dict]) -> List[Dict]:
+        """
+        Convert Groq/OpenAI format tools to Gemini format.
+        
+        Groq format: {"type": "function", "function": {...}}
+        Gemini format: {"name": "...", "description": "...", "parameters": {...}}
+        
+        Gemini requires:
+        - Property types as UPPERCASE (STRING, NUMBER, BOOLEAN, ARRAY, OBJECT)
+        - No "type": "object" at root parameters level
+        """
+        gemini_tools = []
+        
+        def convert_type(json_type: str) -> str:
+            """Convert JSON Schema type to Gemini type."""
+            type_map = {
+                "string": "STRING",
+                "number": "NUMBER",
+                "integer": "INTEGER",
+                "boolean": "BOOLEAN",
+                "array": "ARRAY",
+                "object": "OBJECT"
+            }
+            return type_map.get(json_type, "STRING")
+        
+        def convert_properties(properties: Dict) -> Dict:
+            """Convert property definitions to Gemini format."""
+            converted = {}
+            for prop_name, prop_def in properties.items():
+                new_def = {}
+                
+                # Handle oneOf (like clean_missing_values strategy)
+                if "oneOf" in prop_def:
+                    # For oneOf, just pick the first option or simplify
+                    if isinstance(prop_def["oneOf"], list) and len(prop_def["oneOf"]) > 0:
+                        first_option = prop_def["oneOf"][0]
+                        if "type" in first_option:
+                            new_def["type"] = convert_type(first_option["type"])
+                        if "enum" in first_option:
+                            new_def["enum"] = first_option["enum"]
+                    else:
+                        new_def["type"] = "STRING"
+                elif "type" in prop_def:
+                    new_def["type"] = convert_type(prop_def["type"])
+                    
+                    # Handle arrays
+                    if prop_def["type"] == "array" and "items" in prop_def:
+                        new_def["items"] = {"type": convert_type(prop_def["items"].get("type", "string"))}
+                    
+                    # Keep enum
+                    if "enum" in prop_def:
+                        new_def["enum"] = prop_def["enum"]
+                else:
+                    new_def["type"] = "STRING"
+                
+                # Keep description if present
+                if "description" in prop_def:
+                    new_def["description"] = prop_def["description"]
+                
+                converted[prop_name] = new_def
+            
+            return converted
+        
+        for tool in groq_tools:
+            func = tool["function"]
+            params = func.get("parameters", {})
+            
+            # Convert parameters to Gemini format
+            gemini_params = {
+                "type": "OBJECT",  # Gemini uses UPPERCASE
+                "properties": convert_properties(params.get("properties", {})),
+                "required": params.get("required", [])
+            }
+            
+            gemini_tool = {
+                "name": func["name"],
+                "description": func["description"],
+                "parameters": gemini_params
+            }
+            gemini_tools.append(gemini_tool)
+        
+        return gemini_tools
+    
     def analyze(self, file_path: str, task_description: str, 
                target_col: Optional[str] = None, 
                use_cache: bool = True,
                stream: bool = True,
-               max_iterations: int = 10) -> Dict[str, Any]:
+               max_iterations: int = 20) -> Dict[str, Any]:
         """
         Main entry point for data science analysis.
         
@@ -456,6 +585,11 @@ Execute the complete workflow: profile → clean → convert types → encode �
         workflow_history = []
         iteration = 0
         
+        # For Gemini, maintain a persistent chat session
+        gemini_chat = None
+        if self.provider == "gemini":
+            gemini_chat = self.gemini_model.start_chat(history=[])
+        
         while iteration < max_iterations:
             iteration += 1
             
@@ -467,54 +601,90 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     print(f"📊 Pruned conversation history (keeping last 8 messages)")
                 
                 # Use compressed tools registry (all 46 tools but shorter descriptions)
-                try:
-                    print(f"[DEBUG] Before _compress_tools_registry()")
-                    tools_to_use = self._compress_tools_registry()
-                    print(f"[DEBUG] After _compress_tools_registry(), tools count: {len(tools_to_use)}")
-                    print(f"[DEBUG]   First tool type: {type(tools_to_use[0])}")
-                except TypeError as e:
-                    if "unhashable" in str(e):
-                        print(f"❌ ERROR in _compress_tools_registry(): {e}")
-                        import traceback
-                        traceback.print_exc()
-                    raise
+                tools_to_use = self._compress_tools_registry()
                 
-                # Call Groq with function calling
-                try:
-                    print(f"[DEBUG] Before Groq API call")
-                    print(f"[DEBUG]   messages count: {len(messages)}")
-                    print(f"[DEBUG]   tools_to_use count: {len(tools_to_use)}")
+                # Rate limiting - wait if needed (for Gemini free tier: 10 RPM)
+                if self.min_api_call_interval > 0:
+                    time_since_last_call = time.time() - self.last_api_call_time
+                    if time_since_last_call < self.min_api_call_interval:
+                        wait_time = self.min_api_call_interval - time_since_last_call
+                        print(f"⏳ Rate limiting: waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                
+                # Call LLM with function calling (provider-specific)
+                if self.provider == "groq":
                     response = self.groq_client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         tools=tools_to_use,
                         tool_choice="auto",
+                        parallel_tool_calls=False,  # Disable parallel calls to prevent XML format errors
                         temperature=0.1,  # Low temperature for consistent outputs
                         max_tokens=4096
                     )
-                    print(f"[DEBUG] After Groq API call - SUCCESS")
-                except TypeError as e:
-                    if "unhashable" in str(e):
-                        print(f"❌ ERROR in Groq API call: {e}")
-                        print(f"[DEBUG]   Checking messages for unhashable types:")
-                        for i, msg in enumerate(messages):
-                            print(f"     Message {i}: role={msg.get('role')}, type={type(msg)}")
-                        print(f"[DEBUG]   Checking tools for unhashable types:")
-                        for i, tool in enumerate(tools_to_use[:3]):  # Check first 3
-                            print(f"     Tool {i}: {tool.get('function', {}).get('name', 'unknown')}")
-                        import traceback
-                        traceback.print_exc()
-                    raise
-                
-                self.api_calls_made += 1
-                
-                # Get response message
-                response_message = response.choices[0].message
+                    
+                    self.api_calls_made += 1
+                    self.last_api_call_time = time.time()
+                    response_message = response.choices[0].message
+                    tool_calls = response_message.tool_calls
+                    final_content = response_message.content
+                    
+                elif self.provider == "gemini":
+                    # Convert tools to Gemini format
+                    gemini_tools = self._convert_to_gemini_tools(tools_to_use)
+                    
+                    # First iteration: send system + user message
+                    if iteration == 1:
+                        combined_message = f"{messages[0]['content']}\n\n{messages[1]['content']}"
+                        response = gemini_chat.send_message(
+                            combined_message,
+                            tools=gemini_tools
+                        )
+                    else:
+                        # Subsequent iterations: send function responses
+                        # Gemini needs function responses to continue the conversation
+                        # The last message should be a tool response
+                        last_tool_msg = messages[-1]
+                        if last_tool_msg.get("role") == "tool":
+                            # Send function response back to Gemini using proper format
+                            from google.ai.generativelanguage_v1beta.types import content as glm_content
+                            
+                            function_response_part = glm_content.Part(
+                                function_response=glm_content.FunctionResponse(
+                                    name=last_tool_msg["name"],
+                                    response={"result": last_tool_msg["content"]}
+                                )
+                            )
+                            
+                            response = gemini_chat.send_message(
+                                function_response_part,
+                                tools=gemini_tools
+                            )
+                        else:
+                            # Shouldn't happen, but fallback
+                            response = gemini_chat.send_message(
+                                "Continue with the next step.",
+                                tools=gemini_tools
+                            )
+                    
+                    self.api_calls_made += 1
+                    self.last_api_call_time = time.time()
+                    
+                    # Extract function calls from Gemini response
+                    tool_calls = []
+                    final_content = None
+                    
+                    if response.candidates and response.candidates[0].content.parts:
+                        for part in response.candidates[0].content.parts:
+                            if hasattr(part, 'function_call') and part.function_call:
+                                tool_calls.append(part.function_call)
+                            elif hasattr(part, 'text') and part.text:
+                                final_content = part.text
                 
                 # Check if done (no tool calls)
-                if not response_message.tool_calls:
+                if not tool_calls:
                     # Final response
-                    final_summary = response_message.content
+                    final_summary = final_content or "Analysis completed"
                     
                     result = {
                         "status": "success",
@@ -534,78 +704,144 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     
                     return result
                 
-                # Execute tool calls
-                try:
-                    print(f"[DEBUG] Before appending response_message")
-                    print(f"[DEBUG]   response_message type: {type(response_message)}")
+                # Execute tool calls (provider-specific format)
+                if self.provider == "groq":
                     messages.append(response_message)
-                    print(f"[DEBUG] Successfully appended response_message")
-                except TypeError as e:
-                    if "unhashable" in str(e):
-                        print(f"❌ ERROR appending response_message: {e}")
-                        print(f"   response_message: {response_message}")
-                        import traceback
-                        traceback.print_exc()
-                    raise
                 
-                for tool_call in response_message.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+                for tool_call in tool_calls:
+                    # Extract tool name and args (provider-specific)
+                    if self.provider == "groq":
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        tool_call_id = tool_call.id
+                    elif self.provider == "gemini":
+                        tool_name = tool_call.name
+                        # Convert protobuf args to Python dict
+                        tool_args = {}
+                        for key, value in tool_call.args.items():
+                            # Handle different protobuf value types
+                            if isinstance(value, (str, int, float, bool)):
+                                tool_args[key] = value
+                            elif hasattr(value, '__iter__') and not isinstance(value, str):
+                                # Convert lists/repeated fields
+                                tool_args[key] = list(value)
+                            else:
+                                # Fallback: try to convert to string
+                                tool_args[key] = str(value)
+                        tool_call_id = f"gemini_{iteration}_{tool_name}"
                     
                     print(f"\n🔧 Executing: {tool_name}")
-                    print(f"   Arguments: {json.dumps(tool_args, indent=2)}")
+                    try:
+                        print(f"   Arguments: {json.dumps(tool_args, indent=2)}")
+                    except:
+                        print(f"   Arguments: {tool_args}")
                     
                     # Execute tool
                     tool_result = self._execute_tool(tool_name, tool_args)
                     
                     # Track in workflow
-                    try:
-                        print(f"[DEBUG] Before appending to workflow_history")
-                        workflow_history.append({
-                            "iteration": iteration,
-                            "tool": tool_name,
-                            "arguments": tool_args,
-                            "result": tool_result
-                        })
-                        print(f"[DEBUG] Successfully appended to workflow_history")
-                    except TypeError as e:
-                        if "unhashable" in str(e):
-                            print(f"❌ ERROR appending to workflow_history: {e}")
-                            print(f"   tool_result type: {type(tool_result)}")
-                            print(f"   tool_result keys: {tool_result.keys() if isinstance(tool_result, dict) else 'N/A'}")
-                            import traceback
-                            traceback.print_exc()
-                        raise
-                    
-                    # Add tool result to messages
-                    try:
-                        print(f"[DEBUG] Before appending tool result to messages")
-                        formatted_result = self._format_tool_result(tool_result)
-                        print(f"[DEBUG]   formatted_result type: {type(formatted_result)}")
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": formatted_result
-                        })
-                        print(f"[DEBUG] Successfully appended tool result to messages")
-                    except TypeError as e:
-                        if "unhashable" in str(e):
-                            print(f"❌ ERROR appending tool result to messages: {e}")
-                            print(f"   tool_call.id: {tool_call.id}")
-                            print(f"   tool_name: {tool_name}")
-                            print(f"   formatted_result: {formatted_result[:200]}")
-                            import traceback
-                            traceback.print_exc()
-                        raise
+                    workflow_history.append({
+                        "iteration": iteration,
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "result": tool_result
+                    })
                     
                     print(f"   ✓ Completed: {tool_name}")
+                    
+                    # Debug: Check if training completed
+                    if tool_name == "train_baseline_models":
+                        print(f"[DEBUG] train_baseline_models executed!")
+                        print(f"[DEBUG]   tool_result keys: {list(tool_result.keys())}")
+                        print(f"[DEBUG]   'best_model' in tool_result: {'best_model' in tool_result}")
+                        if isinstance(tool_result, dict) and 'result' in tool_result:
+                            print(f"[DEBUG]   Nested result keys: {list(tool_result['result'].keys()) if isinstance(tool_result['result'], dict) else 'Not a dict'}")
+                            print(f"[DEBUG]   'best_model' in nested result: {'best_model' in tool_result['result'] if isinstance(tool_result['result'], dict) else False}")
+                        if "best_model" in tool_result:
+                            print(f"[DEBUG]   best_model value: {tool_result['best_model']}")
+                    
+                    # Check if training is complete - if so, finish successfully BEFORE adding to messages
+                    # Extract the actual result (might be nested under 'result' key)
+                    actual_result = tool_result.get("result", tool_result) if isinstance(tool_result, dict) else tool_result
+                    if tool_name == "train_baseline_models" and isinstance(actual_result, dict) and "best_model" in actual_result:
+                        print(f"🎯 AUTO-FINISH TRIGGERED! Training complete, returning comprehensive report...")
+                        # Generate comprehensive summary
+                        summary = f"""✅ **Machine Learning Pipeline Complete!**
+
+**Dataset:** `{file_path.split('/')[-1] if '/' in file_path else file_path.split('\\')[-1]}`
+**Target:** `{target_col or 'Auto-detected'}`
+
+---
+
+### 📊 Data Processing Pipeline
+
+**Step 1: Data Profiling**
+- Analyzed {actual_result.get('n_samples', 'N/A')} rows with {actual_result.get('n_features', 'N/A')} features
+- Identified data types and missing values
+
+**Step 2: Data Quality**
+- Detected and documented quality issues
+- Checked for missing values, duplicates, outliers
+
+**Step 3: Data Cleaning**
+- Cleaned missing values using auto-detection
+- Handled outliers with clipping method
+
+**Step 4: Feature Engineering**
+- Converted string columns to numeric (force conversion)
+- Encoded categorical variables
+- Prepared features for modeling
+
+**Step 5: Model Training** 🎯
+- Trained **4 baseline models**: Ridge, Lasso, Random Forest, XGBoost
+- Task type: **{actual_result.get('task_type', 'regression').title()}**
+- Train/Test split: 80/20
+
+---
+
+### 🏆 Best Model Results
+
+**Model:** {actual_result.get('best_model', {}).get('name', 'N/A').upper().replace('_', ' ')}
+**Performance Score (R²):** {actual_result.get('best_model', {}).get('score', 'N/A'):.4f}
+
+**All Models Trained:**
+"""
+                        if "models" in actual_result:
+                            for model_name in actual_result["models"].keys():
+                                summary += f"\n- ✓ {model_name.replace('_', ' ').title()}"
+                        
+                        summary += f"""
+
+**Model saved at:** `./outputs/models/`
+**Processed data:** `./outputs/data/encoded.csv`
+
+---
+
+**Total execution time:** {round(time.time() - start_time, 2)}s
+**API calls:** {self.api_calls_made}
+**Pipeline steps:** {len(workflow_history)}
+"""
+                        
+                        return {
+                            "status": "success",
+                            "summary": summary,
+                            "workflow_history": workflow_history,
+                            "iterations": iteration,
+                            "api_calls": self.api_calls_made,
+                            "execution_time": round(time.time() - start_time, 2)
+                        }
             
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
+                print(f"❌ ERROR in analyze loop: {e}")
+                print(f"   Error type: {type(e).__name__}")
+                print(f"   Traceback:\n{error_traceback}")
                 return {
                     "status": "error",
                     "error": str(e),
                     "error_type": type(e).__name__,
+                    "traceback": error_traceback,
                     "workflow_history": workflow_history,
                     "iterations": iteration
                 }

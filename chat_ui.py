@@ -559,6 +559,6 @@ if __name__ == "__main__":
     demo.launch(
         share=False,  # Set to True to create a public link
         server_name="127.0.0.1",
-        server_port=7866,  # Changed port to avoid conflict
+        server_port=7865,  # Changed port to avoid conflict
         show_error=True
     )
