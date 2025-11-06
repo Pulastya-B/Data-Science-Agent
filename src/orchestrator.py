@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import time
+import httpx
 
 from groq import Groq
 import google.generativeai as genai
@@ -73,6 +74,27 @@ from tools import (
     forecast_time_series,
     detect_seasonality_trends,
     create_time_series_features,
+    # Advanced Insights (6)
+    analyze_root_cause,
+    detect_trends_and_seasonality,
+    detect_anomalies_advanced,
+    perform_hypothesis_testing,
+    analyze_distribution,
+    perform_segment_analysis,
+    # Automated Pipeline (2)
+    auto_ml_pipeline,
+    auto_feature_selection,
+    # Visualization (5)
+    generate_all_plots,
+    generate_data_quality_plots,
+    generate_eda_plots,
+    generate_model_performance_plots,
+    generate_feature_importance_plot,
+    # Enhanced Feature Engineering (4)
+    create_ratio_features,
+    create_statistical_features,
+    create_log_features,
+    create_binned_features,
 )
 
 
@@ -159,7 +181,7 @@ class DataScienceCopilot:
         Path("./outputs/data").mkdir(exist_ok=True)
     
     def _build_tool_functions_map(self) -> Dict[str, callable]:
-        """Build mapping of tool names to their functions - All 46 tools."""
+        """Build mapping of tool names to their functions - All 63 tools."""
         return {
             # Basic Tools (10)
             "profile_dataset": profile_dataset,
@@ -217,6 +239,27 @@ class DataScienceCopilot:
             "forecast_time_series": forecast_time_series,
             "detect_seasonality_trends": detect_seasonality_trends,
             "create_time_series_features": create_time_series_features,
+            # Advanced Insights (6)
+            "analyze_root_cause": analyze_root_cause,
+            "detect_trends_and_seasonality": detect_trends_and_seasonality,
+            "detect_anomalies_advanced": detect_anomalies_advanced,
+            "perform_hypothesis_testing": perform_hypothesis_testing,
+            "analyze_distribution": analyze_distribution,
+            "perform_segment_analysis": perform_segment_analysis,
+            # Automated Pipeline (2)
+            "auto_ml_pipeline": auto_ml_pipeline,
+            "auto_feature_selection": auto_feature_selection,
+            # Visualization (5)
+            "generate_all_plots": generate_all_plots,
+            "generate_data_quality_plots": generate_data_quality_plots,
+            "generate_eda_plots": generate_eda_plots,
+            "generate_model_performance_plots": generate_model_performance_plots,
+            "generate_feature_importance_plot": generate_feature_importance_plot,
+            # Enhanced Feature Engineering (4)
+            "create_ratio_features": create_ratio_features,
+            "create_statistical_features": create_statistical_features,
+            "create_log_features": create_log_features,
+            "create_binned_features": create_binned_features,
         }
     
     def _build_system_prompt(self) -> str:
@@ -230,12 +273,15 @@ class DataScienceCopilot:
 **WORKFLOW (Execute ALL steps - DO NOT SKIP):**
 1. profile_dataset(file_path) - ONCE ONLY
 2. detect_data_quality_issues(file_path) - ONCE ONLY
-3. clean_missing_values(file_path, strategy="auto", output="./outputs/data/cleaned.csv")
-4. handle_outliers(cleaned, method="clip", columns=["all"], output="./outputs/data/no_outliers.csv")
-5. force_numeric_conversion(latest, columns=["all"], output="./outputs/data/numeric.csv", errors="coerce")
-6. encode_categorical(latest, method="auto", output="./outputs/data/encoded.csv")
-7. **train_baseline_models**(encoded, target_col, task_type="auto") ← REQUIRED! DO NOT SKIP!
-8. STOP after training completes (no need for generate_model_report)
+3. generate_data_quality_plots(file_path, output_dir="./outputs/plots/quality") - Generate quality visualizations
+4. clean_missing_values(file_path, strategy="auto", output="./outputs/data/cleaned.csv")
+5. handle_outliers(cleaned, method="clip", columns=["all"], output="./outputs/data/no_outliers.csv")
+6. force_numeric_conversion(latest, columns=["all"], output="./outputs/data/numeric.csv", errors="coerce")
+7. encode_categorical(latest, method="auto", output="./outputs/data/encoded.csv")
+8. generate_eda_plots(encoded, target_col, output_dir="./outputs/plots/eda") - Generate EDA visualizations
+9. **train_baseline_models**(encoded, target_col, task_type="auto") ← REQUIRED! DO NOT SKIP!
+10. analyze_distribution(encoded, target_col) - Analyze target distribution
+11. STOP after analysis completes - All visualizations are auto-generated during training
 
 **CRITICAL RULES:**
 - DO NOT repeat profile_dataset or detect_data_quality_issues multiple times
@@ -243,12 +289,16 @@ class DataScienceCopilot:
 - DO NOT call smart_type_inference after encoding - data is ready
 - Training is the GOAL - do not analyze endlessly, just TRAIN
 
-**KEY TOOLS (46 total available via function calling):**
+**KEY TOOLS (63 total available via function calling):**
 - force_numeric_conversion: Converts string columns to numeric (auto-detects, skips text)
 - clean_missing_values: "auto" mode supported
 - encode_categorical: one-hot/target/frequency encoding
 - train_baseline_models: Trains multiple models automatically
 - Advanced: hyperparameter_tuning, train_ensemble_models, perform_eda_analysis, handle_imbalanced_data, perform_feature_scaling, detect_anomalies, detect_and_handle_multicollinearity, auto_feature_engineering, forecast_time_series, explain_predictions, generate_business_insights, perform_topic_modeling, extract_image_features, monitor_model_drift
+- NEW Advanced Insights: analyze_root_cause, detect_trends_and_seasonality, detect_anomalies_advanced, perform_hypothesis_testing, analyze_distribution, perform_segment_analysis
+- NEW Automation: auto_ml_pipeline (zero-config full pipeline), auto_feature_selection
+- NEW Visualization: generate_all_plots, generate_data_quality_plots, generate_eda_plots, generate_model_performance_plots, generate_feature_importance_plot
+- NEW Enhanced Feature Engineering: create_ratio_features, create_statistical_features, create_log_features, create_binned_features
 
 **RULES:**
 ✅ EXECUTE each step (use tools) - ONE tool call per response
@@ -766,9 +816,11 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     if tool_name == "train_baseline_models" and isinstance(actual_result, dict) and "best_model" in actual_result:
                         print(f"🎯 AUTO-FINISH TRIGGERED! Training complete, returning comprehensive report...")
                         # Generate comprehensive summary
+                        # Extract filename without backslash in f-string
+                        filename = file_path.split('/')[-1] if '/' in file_path else file_path.split('\\')[-1]
                         summary = f"""✅ **Machine Learning Pipeline Complete!**
 
-**Dataset:** `{file_path.split('/')[-1] if '/' in file_path else file_path.split('\\')[-1]}`
+**Dataset:** `{filename}`
 **Target:** `{target_col or 'Auto-detected'}`
 
 ---
