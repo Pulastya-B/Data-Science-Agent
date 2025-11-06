@@ -9,6 +9,7 @@ Upload datasets, ask questions, and get AI-powered insights!
 import gradio as gr
 import sys
 import os
+import shutil
 from pathlib import Path
 import traceback
 
@@ -36,11 +37,15 @@ except Exception as e:
 # Store uploaded file path
 current_file = None
 current_profile = None
+last_agent_response = None  # Store last agent response for visualization extraction
 
 
 def analyze_dataset(file, user_message, history):
     """Process uploaded dataset and user message."""
-    global current_file, current_profile
+    global current_file, current_profile, last_agent_response
+    
+    # Initialize with empty plot list (will collect PNG file paths)
+    plots_paths = []
     
     # Initialize history if None
     if history is None:
@@ -53,58 +58,68 @@ def analyze_dataset(file, user_message, history):
         # If a new file is uploaded (and it's different from current)
         if file is not None and (current_file is None or file.name != current_file):
             print(f"[DEBUG] Processing new file upload: {file.name}")
-            current_file = file.name
             
-            # Profile the dataset
-            response = f"📊 **Dataset Uploaded Successfully!**\n\n"
-            response += f"**File:** {Path(current_file).name}\n\n"
+            # Copy the uploaded file to a simpler path to avoid issues with long temp paths
+            import shutil
+            os.makedirs("./temp", exist_ok=True)
+            simple_filename = Path(file.name).name
+            simple_path = f"./temp/{simple_filename}"
+            shutil.copy2(file.name, simple_path)
+            current_file = simple_path
+            print(f"[DEBUG] Copied file to simpler path: {current_file}")
             
-            # Get basic profile
-            profile = profile_dataset(current_file)
-            current_profile = profile
-            
-            response += f"**Dataset Overview:**\n"
-            response += f"- Rows: {profile['shape']['rows']:,}\n"
-            response += f"- Columns: {profile['shape']['columns']}\n"
-            
-            # Handle memory_usage (can be float or dict)
-            memory = profile.get('memory_usage', 0)
-            if isinstance(memory, dict):
-                memory = memory.get('total_mb', 0)
-            response += f"- Memory: {memory:.2f} MB\n\n"
-            
-            response += f"**Column Types:**\n"
-            response += f"- Numeric: {len(profile['column_types']['numeric'])} columns\n"
-            response += f"- Categorical: {len(profile['column_types']['categorical'])} columns\n"
-            response += f"- Datetime: {len(profile['column_types']['datetime'])} columns\n\n"
-            
-            # Check data quality
-            quality = detect_data_quality_issues(current_file)
-            if quality['critical']:
-                response += f"🔴 **Critical Issues:** {len(quality['critical'])}\n"
-                for issue in quality['critical'][:3]:
-                    response += f"  - {issue['message']}\n"
-            if quality['warning']:
-                response += f"🟡 **Warnings:** {len(quality['warning'])}\n"
-                for issue in quality['warning'][:3]:
-                    response += f"  - {issue['message']}\n"
-            
-            response += f"\n\n💬 **What would you like to do with this dataset?**\n\n"
-            response += "You can ask me to:\n"
-            response += "- Train a classification or regression model\n"
-            response += "- Analyze specific columns\n"
-            response += "- Detect outliers\n"
-            response += "- Engineer features\n"
-            response += "- Generate predictions\n"
-            response += "- And much more!\n"
-            
-            # Add or replace message in history
-            if history and len(history) > 0 and history[-1][0] is None:
-                history[-1] = (None, response)
-            else:
-                history.append((None, response))
-            yield history, ""
-            return
+            # Only show file upload response if there's no user message
+            if not (user_message and user_message.strip()):
+                # Profile the dataset
+                response = f"📊 **Dataset Uploaded Successfully!**\n\n"
+                response += f"**File:** {Path(current_file).name}\n\n"
+                
+                # Get basic profile
+                profile = profile_dataset(current_file)
+                current_profile = profile
+                
+                response += f"**Dataset Overview:**\n"
+                response += f"- Rows: {profile['shape']['rows']:,}\n"
+                response += f"- Columns: {profile['shape']['columns']}\n"
+                
+                # Handle memory_usage (can be float or dict)
+                memory = profile.get('memory_usage', 0)
+                if isinstance(memory, dict):
+                    memory = memory.get('total_mb', 0)
+                response += f"- Memory: {memory:.2f} MB\n\n"
+                
+                response += f"**Column Types:**\n"
+                response += f"- Numeric: {len(profile['column_types']['numeric'])} columns\n"
+                response += f"- Categorical: {len(profile['column_types']['categorical'])} columns\n"
+                response += f"- Datetime: {len(profile['column_types']['datetime'])} columns\n\n"
+                
+                # Check data quality
+                quality = detect_data_quality_issues(current_file)
+                if quality['critical']:
+                    response += f"🔴 **Critical Issues:** {len(quality['critical'])}\n"
+                    for issue in quality['critical'][:3]:
+                        response += f"  - {issue['message']}\n"
+                if quality['warning']:
+                    response += f"🟡 **Warnings:** {len(quality['warning'])}\n"
+                    for issue in quality['warning'][:3]:
+                        response += f"  - {issue['message']}\n"
+                
+                response += f"\n\n💬 **What would you like to do with this dataset?**\n\n"
+                response += "You can ask me to:\n"
+                response += "- Train a classification or regression model\n"
+                response += "- Analyze specific columns\n"
+                response += "- Detect outliers\n"
+                response += "- Engineer features\n"
+                response += "- Generate predictions\n"
+                response += "- And much more!\n"
+                
+                # Add or replace message in history
+                if history and len(history) > 0 and history[-1][0] is None:
+                    history[-1] = (None, response)
+                else:
+                    history.append((None, response))
+                yield history, "", []
+                return
         
         # If user sends a message about the current file
         print(f"[DEBUG] Checking message conditions: user_message={bool(user_message and user_message.strip())}, current_file={bool(current_file)}")
@@ -116,7 +131,7 @@ def analyze_dataset(file, user_message, history):
                     # Show immediate processing message
                     print(f"🤖 AI Agent analyzing: {user_message}")
                     history.append((user_message, "🤖 **AI Agent is thinking...**\n\n⏳ Analyzing your request and planning the workflow..."))
-                    yield history, ""
+                    yield history, "", []
                     
                     # Use the AI agent to process the request
                     print(f"📂 File path: {current_file}")
@@ -132,23 +147,118 @@ def analyze_dataset(file, user_message, history):
                     
                     print(f"✅ Agent response received: {agent_response.get('status', 'unknown')}")
                     
+                    # Store agent response for visualization extraction
+                    last_agent_response = agent_response
+                    
                     # Format the response
                     if agent_response.get('status') == 'success':
                         response = f"🤖 **AI Agent Analysis Complete!**\n\n"
                         response += f"{agent_response.get('summary', '')}\n\n"
                         
                         if 'workflow_history' in agent_response and agent_response['workflow_history']:
-                            response += f"**Tools Executed:** {len(agent_response['workflow_history'])}\n"
-                            response += f"**Iterations:** {agent_response.get('iterations', 0)}\n"
-                            response += f"**Time:** {agent_response.get('execution_time', 0)}s\n\n"
+                            response += f"**Execution Summary:**\n"
+                            response += f"- Tools Executed: {len(agent_response['workflow_history'])}\n"
+                            response += f"- Iterations: {agent_response.get('iterations', 0)}\n"
+                            response += f"- Time: {agent_response.get('execution_time', 0):.1f}s\n\n"
                             
-                            # Show tool execution summary
-                            response += "**Workflow:**\n"
-                            for step in agent_response['workflow_history'][-5:]:  # Show last 5 steps
+                            # Find and display MODEL TRAINING RESULTS with ALL METRICS
+                            model_results = None
+                            for step in agent_response['workflow_history']:
+                                if step.get('tool') == 'train_baseline_models':
+                                    result = step.get('result', {})
+                                    if isinstance(result, dict) and 'result' in result:
+                                        model_results = result['result']
+                                    elif isinstance(result, dict):
+                                        model_results = result
+                                    break
+                            
+                            if model_results and 'models' in model_results:
+                                response += f"## 🎯 Model Training Results\n\n"
+                                task_type = model_results.get('task_type', 'unknown')
+                                response += f"**Task Type:** {task_type.title()}\n"
+                                response += f"**Features:** {model_results.get('n_features', 0)}\n"
+                                response += f"**Training Samples:** {model_results.get('train_size', 0):,}\n"
+                                response += f"**Test Samples:** {model_results.get('test_size', 0):,}\n\n"
+                                
+                                # Show ALL models tested
+                                response += "### 📊 All Models Tested:\n\n"
+                                models_data = model_results.get('models', {})
+                                
+                                for model_name, model_info in models_data.items():
+                                    if 'test_metrics' in model_info:
+                                        metrics = model_info['test_metrics']
+                                        response += f"**{model_name}:**\n"
+                                        
+                                        if task_type == 'classification':
+                                            response += f"- Accuracy: {metrics.get('accuracy', 0):.4f}\n"
+                                            response += f"- Precision: {metrics.get('precision', 0):.4f}\n"
+                                            response += f"- Recall: {metrics.get('recall', 0):.4f}\n"
+                                            response += f"- F1 Score: {metrics.get('f1', 0):.4f}\n"
+                                        else:
+                                            response += f"- R² Score: {metrics.get('r2', 0):.4f}\n"
+                                            response += f"- RMSE: {metrics.get('rmse', 0):.2f}\n"
+                                            response += f"- MAE: {metrics.get('mae', 0):.2f}\n"
+                                            response += f"- MAPE: {metrics.get('mape', 0):.2f}%\n"
+                                        response += "\n"
+                                
+                                # Highlight BEST MODEL
+                                best_model = model_results.get('best_model', {})
+                                if best_model and best_model.get('name'):
+                                    response += f"### 🏆 Best Model: **{best_model['name']}**\n"
+                                    response += f"Score: {best_model.get('score', 0):.4f}\n\n"
+                            
+                            # Show workflow execution summary
+                            response += "### 🔧 Workflow Steps:\n"
+                            for i, step in enumerate(agent_response['workflow_history'], 1):
                                 tool_name = step['tool']
                                 success = step['result'].get('success', False)
                                 icon = "✅" if success else "❌"
-                                response += f"{icon} {tool_name}\n"
+                                response += f"{i}. {icon} {tool_name}\n"
+                            response += "\n"
+                            
+                            # Check for plots in workflow results (now supporting PNG from matplotlib)
+                            for step in agent_response['workflow_history']:
+                                result = step.get('result', {})
+                                
+                                # Deep search for plots in nested results
+                                def find_plots(obj, plots_list):
+                                    if isinstance(obj, dict):
+                                        # Check direct plot keys (now looking for PNG files)
+                                        for key in ['plot_path', 'plot_file', 'output_path', 
+                                                   'plots', 'plot_paths', 'performance_plots', 'feature_importance_plot']:
+                                            if key in obj and obj[key]:
+                                                if isinstance(obj[key], list):
+                                                    for plot_path in obj[key]:
+                                                        # Support both PNG (new) and HTML (backward compat)
+                                                        if isinstance(plot_path, str) and (plot_path.endswith('.png') or plot_path.endswith('.html')) and os.path.exists(plot_path):
+                                                            plots_list.append(plot_path)
+                                                elif isinstance(obj[key], str) and (obj[key].endswith('.png') or obj[key].endswith('.html')) and os.path.exists(obj[key]):
+                                                    plots_list.append(obj[key])
+                                        # Recursively search nested dicts
+                                        for value in obj.values():
+                                            find_plots(value, plots_list)
+                                
+                                find_plots(result, plots_paths)
+                            
+                            # Remove duplicates while preserving order
+                            plots_paths = list(dict.fromkeys(plots_paths))
+                            
+                            # Display plot information in response
+                            if plots_paths:
+                                response += f"## 📊 Generated Visualizations ({len(plots_paths)} plots)\n\n"
+                                response += "✅ Plots are displayed in the **Visualization Gallery** below!\n\n"
+                                
+                                # List plot files
+                                for i, plot_path in enumerate(plots_paths[:10], 1):
+                                    try:
+                                        plot_name = Path(plot_path).stem.replace('_', ' ').title()
+                                        rel_path = os.path.relpath(plot_path, '.')
+                                        response += f"{i}. 📊 **{plot_name}**\n"
+                                        response += f"   📁 `{rel_path}`\n\n"
+                                    except Exception as e:
+                                        response += f"{i}. ❌ Error: {str(e)}\n"
+                            else:
+                                response += "ℹ️ No visualizations were generated in this workflow.\n"
                     else:
                         response = f"⚠️ **AI Agent Status:** {agent_response.get('status', 'unknown')}\n\n"
                         response += f"{agent_response.get('message', agent_response.get('error', 'Unknown error'))}\n"
@@ -158,7 +268,9 @@ def analyze_dataset(file, user_message, history):
                         history[-1] = (user_message, response)
                     else:
                         history.append((user_message, response))
-                    yield history, ""
+                    
+                    # Return plot paths for gallery (gr.Gallery expects list of file paths)
+                    yield history, "", plots_paths if plots_paths else []
                     return
                 except Exception as e:
                     import sys
@@ -175,7 +287,7 @@ def analyze_dataset(file, user_message, history):
                         history[-1] = (user_message, response)
                     else:
                         history.append((user_message, response))
-                    yield history, ""
+                    yield history, "", plots_paths if plots_paths else []
                     return
             else:
                 # Manual mode - Handle commands directly
@@ -260,7 +372,7 @@ def analyze_dataset(file, user_message, history):
                     history[-1] = (user_message, response)
                 else:
                     history.append((user_message, response))
-                yield history, ""
+                yield history, "", []
                 return
         
         # If no file is uploaded yet
@@ -272,7 +384,7 @@ def analyze_dataset(file, user_message, history):
                 history[-1] = (user_message, response)
             else:
                 history.append((user_message, response))
-            yield history, ""
+            yield history, "", []
             return
             
     except Exception as e:
@@ -285,11 +397,11 @@ def analyze_dataset(file, user_message, history):
                 history.append((user_message, error_msg))
         else:
             history.append((None, error_msg))
-        yield history, ""
+        yield history, "", []
         return
     
     # Default return if nothing matched
-    yield history, ""
+    yield history, "", []
 
 
 def quick_profile(file):
@@ -371,33 +483,74 @@ def train_model_ui(file, target_col, model_type, test_size, progress=gr.Progress
         best_model_info = result['models'][best_model_name]
         best_metrics = best_model_info.get('test_metrics', {})
         
-        output = f"✅ **Model Trained Successfully!**\n\n"
-        output += f"**Best Model:** {best_model_name}\n\n"
+        output = f"✅ **Model Training Complete!**\n\n"
+        output += f"## 🏆 Best Model: **{best_model_name}**\n\n"
+        
+        output += f"**Dataset Info:**\n"
+        output += f"- Features: {result.get('n_features', 0)}\n"
+        output += f"- Training samples: {result.get('train_size', 0):,}\n"
+        output += f"- Test samples: {result.get('test_size', 0):,}\n\n"
         
         if problem_type == "classification":
             output += f"**Test Metrics:**\n"
-            output += f"- Accuracy: {best_metrics.get('accuracy', 0):.3f}\n"
-            output += f"- Precision: {best_metrics.get('precision', 0):.3f}\n"
-            output += f"- Recall: {best_metrics.get('recall', 0):.3f}\n"
-            output += f"- F1 Score: {best_metrics.get('f1', 0):.3f}\n\n"
+            output += f"- ✅ Accuracy: {best_metrics.get('accuracy', 0):.4f}\n"
+            output += f"- 🎯 Precision: {best_metrics.get('precision', 0):.4f}\n"
+            output += f"- 📊 Recall: {best_metrics.get('recall', 0):.4f}\n"
+            output += f"- 🔥 F1 Score: {best_metrics.get('f1', 0):.4f}\n\n"
         else:
             output += f"**Test Metrics:**\n"
-            output += f"- R² Score: {best_metrics.get('r2', 0):.3f}\n"
-            output += f"- RMSE: {best_metrics.get('rmse', 0):.3f}\n"
-            output += f"- MAE: {best_metrics.get('mae', 0):.3f}\n\n"
+            output += f"- 📈 R² Score: {best_metrics.get('r2', 0):.4f}\n"
+            output += f"- 📉 RMSE: {best_metrics.get('rmse', 0):.2f}\n"
+            output += f"- 📊 MAE: {best_metrics.get('mae', 0):.2f}\n"
+            output += f"- 💯 MAPE: {best_metrics.get('mape', 0):.2f}%\n\n"
         
-        output += f"**All Models Tested:**\n"
+        output += f"## 📊 All Models Comparison:\n\n"
         for model_name, model_info in result['models'].items():
             if 'test_metrics' in model_info:
                 test_metrics = model_info['test_metrics']
+                indicator = "🏆 " if model_name == best_model_name else "   "
                 if problem_type == "classification":
                     f1 = test_metrics.get('f1', 0)
-                    output += f"- {model_name}: {f1:.3f} F1 score\n"
+                    acc = test_metrics.get('accuracy', 0)
+                    output += f"{indicator}**{model_name}:**\n"
+                    output += f"   - F1: {f1:.4f} | Accuracy: {acc:.4f}\n"
                 else:
                     r2 = test_metrics.get('r2', 0)
-                    output += f"- {model_name}: {r2:.3f} R²\n"
+                    rmse = test_metrics.get('rmse', 0)
+                    output += f"{indicator}**{model_name}:**\n"
+                    output += f"   - R²: {r2:.4f} | RMSE: {rmse:.2f}\n"
             elif 'status' in model_info and model_info['status'] == 'error':
-                output += f"- {model_name}: ❌ {model_info.get('message', 'Error')}\n"
+                output += f"   ❌ **{model_name}:** {model_info.get('message', 'Error')}\n"
+        
+        # Display generated plots if available
+        plots_to_show = []
+        
+        # Check for performance plots
+        if 'performance_plots' in result and result['performance_plots']:
+            if isinstance(result['performance_plots'], list):
+                plots_to_show.extend(result['performance_plots'])
+            else:
+                plots_to_show.append(result['performance_plots'])
+        
+        # Check for feature importance plot
+        if 'feature_importance_plot' in result and result['feature_importance_plot']:
+            plots_to_show.append(result['feature_importance_plot'])
+        
+        # Embed plots
+        if plots_to_show:
+            output += f"\n\n📊 **Visualizations:**\n\n"
+            for plot_path in plots_to_show:
+                if isinstance(plot_path, str) and plot_path.endswith('.html') and os.path.exists(plot_path):
+                    try:
+                        with open(plot_path, 'r', encoding='utf-8') as f:
+                            plot_html = f.read()
+                        # Add plot title based on filename
+                        plot_name = Path(plot_path).stem.replace('_', ' ').title()
+                        output += f"**{plot_name}:**\n"
+                        output += f'<iframe srcdoc="{plot_html.replace(chr(34), "&quot;")}" width="100%" height="500" frameborder="0"></iframe>\n\n'
+                    except Exception as e:
+                        # Fallback to file path
+                        output += f"📁 {Path(plot_path).name}: `{plot_path}`\n"
         
         progress(1.0, desc="✅ Complete!")
         yield output
@@ -411,7 +564,88 @@ def clear_conversation():
     global current_file, current_profile
     current_file = None
     current_profile = None
-    return [], None, ""
+    return [], None, "", []
+
+
+def extract_and_display_plots(agent_response):
+    """Extract plots from agent response and format them for display."""
+    plots_html = ""
+    
+    if not agent_response or agent_response.get('status') != 'success':
+        return gr.update(value="<p style='text-align:center; color:#666;'>No visualizations generated yet. Upload a dataset and run analysis!</p>")
+    
+    workflow_history = agent_response.get('workflow_history', [])
+    if not workflow_history:
+        return gr.update(value="<p style='text-align:center; color:#666;'>No visualizations in this workflow.</p>")
+    
+    # Find all plots
+    plots_paths = []
+    
+    def find_plots(obj, plots_list):
+        if isinstance(obj, dict):
+            # Check direct plot keys
+            for key in ['plot_path', 'plot_file', 'html_path', 'output_path', 
+                       'plots', 'plot_paths', 'performance_plots', 'feature_importance_plot']:
+                if key in obj and obj[key]:
+                    if isinstance(obj[key], list):
+                        for plot_path in obj[key]:
+                            if isinstance(plot_path, str) and plot_path.endswith('.html') and os.path.exists(plot_path):
+                                plots_list.append(plot_path)
+                    elif isinstance(obj[key], str) and obj[key].endswith('.html') and os.path.exists(obj[key]):
+                        plots_list.append(obj[key])
+            # Recursively search nested dicts
+            for value in obj.values():
+                find_plots(value, plots_list)
+    
+    for step in workflow_history:
+        result = step.get('result', {})
+        find_plots(result, plots_paths)
+    
+    # Remove duplicates while preserving order
+    plots_paths = list(dict.fromkeys(plots_paths))
+    
+    if not plots_paths:
+        return gr.update(value="<p style='text-align:center; color:#666;'>No plots were generated in this analysis.</p>")
+    
+    # Build HTML gallery
+    plots_html = f"""
+    <div style='padding: 20px;'>
+        <h2 style='color: #1f77b4; margin-bottom: 20px;'>📊 Visualization Gallery ({len(plots_paths)} plots)</h2>
+    """
+    
+    for i, plot_path in enumerate(plots_paths, 1):
+        try:
+            with open(plot_path, 'r', encoding='utf-8') as f:
+                plot_content = f.read()
+            
+            plot_name = Path(plot_path).stem.replace('_', ' ').title()
+            
+            plots_html += f"""
+            <div style='margin-bottom: 30px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;'>
+                <div style='background: linear-gradient(90deg, #1f77b4, #2ca02c); color: white; padding: 10px 15px; font-weight: bold;'>
+                    {i}. {plot_name}
+                </div>
+                <div style='padding: 10px; background: white;'>
+                    <iframe srcdoc='{plot_content.replace("'", "&apos;").replace('"', "&quot;")}' 
+                            width='100%' height='500' frameborder='0' 
+                            style='border: none; border-radius: 5px;'></iframe>
+                </div>
+                <div style='background: #f8f9fa; padding: 8px 15px; font-size: 12px; color: #666;'>
+                    📁 {plot_path}
+                </div>
+            </div>
+            """
+        except Exception as e:
+            plots_html += f"""
+            <div style='margin-bottom: 20px; padding: 15px; border: 1px solid #f44336; border-radius: 5px; background: #ffebee;'>
+                <strong>❌ Failed to load: {Path(plot_path).name}</strong><br>
+                <small>{str(e)}</small>
+            </div>
+            """
+    
+    plots_html += "</div>"
+    
+    return gr.update(value=plots_html)
 
 
 # Custom CSS for better visual feedback
@@ -426,7 +660,7 @@ custom_css = """
 }
 """
 
-# Create the Gradio interface
+    # Create the Gradio interface
 with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=custom_css) as demo:
     gr.Markdown("""
     # 🤖 AI Agent Data Scientist
@@ -439,8 +673,12 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
     - 🎯 Model training (classification & regression)
     - 🔍 Data quality analysis
     - 📈 Feature engineering
-    - And 40+ more tools!
+    - 🎨 **NEW:** Automatic visualization generation!
+    - And 59 tools total!
     """)
+    
+    # Store agent response for visualization extraction
+    agent_response_state = gr.State(None)
     
     with gr.Row():
         # Left column - Main chat interface
@@ -452,7 +690,8 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
                 label="Chat with AI Agent",
                 height=450,
                 show_label=True,
-                avatar_images=(None, "🤖")
+                avatar_images=(None, "🤖"),
+                sanitize_html=False  # Allow HTML content including iframes
             )
             
             with gr.Row():
@@ -465,16 +704,14 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
             with gr.Row():
                 user_input = gr.Textbox(
                     label="Your Message",
-                    placeholder="Type: profile, quality, columns, or help",
+                    placeholder="Ask anything: 'train a model', 'analyze my data', 'generate visualizations'",
                     lines=2,
                     scale=4
                 )
                 submit_btn = gr.Button("📤 Send", variant="primary", scale=1)
             
             with gr.Row():
-                clear_btn = gr.Button("🗑️ Clear", variant="secondary")
-        
-        # Right column - Quick actions and info
+                clear_btn = gr.Button("🗑️ Clear", variant="secondary")        # Right column - Quick actions and info
         with gr.Column(scale=1):
             gr.Markdown("## 📊 Dataset Info")
             dataset_info = gr.Markdown("Upload a dataset to see information here.")
@@ -511,25 +748,35 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
             - "Balance the dataset using SMOTE"
             """)
     
+    # Visualization Gallery Section (Full Width)
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("## 🎨 Visualization Gallery")
+            visualization_gallery = gr.Gallery(
+                label="Generated Plots",
+                show_label=True,
+                elem_id="gallery"
+            )
+    
     # Event handlers with streaming support
     submit_btn.click(
         fn=analyze_dataset,
         inputs=[file_upload, user_input, chatbot],
-        outputs=[chatbot, user_input],
+        outputs=[chatbot, user_input, visualization_gallery],
         show_progress="full"  # Show progress bar
     )
     
     user_input.submit(
         fn=analyze_dataset,
         inputs=[file_upload, user_input, chatbot],
-        outputs=[chatbot, user_input],
+        outputs=[chatbot, user_input, visualization_gallery],
         show_progress="full"
     )
     
     file_upload.change(
         fn=analyze_dataset,
         inputs=[file_upload, gr.Textbox(value="", visible=False), chatbot],
-        outputs=[chatbot, user_input],
+        outputs=[chatbot, user_input, visualization_gallery],
         show_progress="full"
     ).then(
         fn=quick_profile,
@@ -546,7 +793,7 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
     
     clear_btn.click(
         clear_conversation,
-        outputs=[chatbot, file_upload, user_input]
+        outputs=[chatbot, file_upload, user_input, visualization_gallery]
     )
 
 if __name__ == "__main__":
@@ -558,7 +805,8 @@ if __name__ == "__main__":
     
     demo.launch(
         share=False,  # Set to True to create a public link
-        server_name="127.0.0.1",
+        server_name="0.0.0.0",  # Listen on all interfaces
         server_port=7865,  # Changed port to avoid conflict
-        show_error=True
+        show_error=True,
+        inbrowser=True  # Auto-open browser
     )

@@ -98,7 +98,39 @@ from .time_series import (
     create_time_series_features
 )
 
+# Advanced Insights Tools (6) - NEW
+from .advanced_insights import (
+    analyze_root_cause,
+    detect_trends_and_seasonality,
+    detect_anomalies_advanced,
+    perform_hypothesis_testing,
+    analyze_distribution,
+    perform_segment_analysis
+)
+
+# Automated Pipeline Tools (2) - NEW
+from .auto_pipeline import (
+    auto_ml_pipeline,
+    auto_feature_selection
+)
+
+# Visualization Tools (5) - NEW
+from .visualization_engine import (
+    generate_all_plots,
+    generate_data_quality_plots,
+    generate_eda_plots,
+    generate_model_performance_plots,
+    generate_feature_importance_plot
+)
+
 from .tools_registry import TOOLS, get_tool_by_name, get_all_tool_names
+
+from tools.enhanced_feature_engineering import (
+    create_ratio_features,
+    create_statistical_features,
+    create_log_features,
+    create_binned_features,
+)
 
 __all__ = [
     # Basic Data Profiling (3)
@@ -174,6 +206,31 @@ __all__ = [
     "forecast_time_series",
     "detect_seasonality_trends",
     "create_time_series_features",
+    
+    # Advanced Insights (6) - NEW
+    "analyze_root_cause",
+    "detect_trends_and_seasonality",
+    "detect_anomalies_advanced",
+    "perform_hypothesis_testing",
+    "analyze_distribution",
+    "perform_segment_analysis",
+    
+    # Automated Pipeline (2) - NEW
+    "auto_ml_pipeline",
+    "auto_feature_selection",
+    
+    # Visualization (5) - NEW
+    "generate_all_plots",
+    "generate_data_quality_plots",
+    "generate_eda_plots",
+    "generate_model_performance_plots",
+    "generate_feature_importance_plot",
+    
+    # Enhanced Feature Engineering (4) - NEW
+    "create_ratio_features",
+    "create_statistical_features",
+    "create_log_features",
+    "create_binned_features",
     
     # Registry
     "TOOLS",

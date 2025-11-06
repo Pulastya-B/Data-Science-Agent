@@ -19,7 +19,14 @@ def load_dataframe(file_path: str) -> pl.DataFrame:
     if file_path.endswith('.parquet'):
         return pl.read_parquet(file_path)
     elif file_path.endswith('.csv'):
-        return pl.read_csv(file_path, try_parse_dates=True)
+        # Use longer schema inference to handle mixed types better
+        # and ignore errors to handle problematic rows gracefully
+        return pl.read_csv(
+            file_path, 
+            try_parse_dates=True,
+            infer_schema_length=10000,  # Scan more rows for better type inference
+            ignore_errors=True  # Skip problematic rows instead of failing
+        )
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 

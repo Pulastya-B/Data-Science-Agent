@@ -19,12 +19,24 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression, Ridge, Lasso
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from xgboost import XGBClassifier, XGBRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
+from catboost import CatBoostClassifier, CatBoostRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix, classification_report,
     mean_squared_error, mean_absolute_error, r2_score
 )
 import shap
+
+try:
+    from .visualization_engine import (
+        generate_model_performance_plots,
+        generate_feature_importance_plot
+    )
+    VISUALIZATION_AVAILABLE = True
+except ImportError as e:
+    VISUALIZATION_AVAILABLE = False
+    print(f"⚠️  Visualization engine not available: {e}")
 
 from utils.polars_helpers import (
     load_dataframe,
@@ -111,7 +123,9 @@ def train_baseline_models(file_path: str, target_col: str,
         models = {
             "logistic_regression": LogisticRegression(max_iter=1000, random_state=random_state),
             "random_forest": RandomForestClassifier(n_estimators=100, random_state=random_state, n_jobs=-1),
-            "xgboost": XGBClassifier(n_estimators=100, random_state=random_state, n_jobs=-1)
+            "xgboost": XGBClassifier(n_estimators=100, random_state=random_state, n_jobs=-1),
+            "lightgbm": LGBMClassifier(n_estimators=100, random_state=random_state, n_jobs=-1, verbose=-1),
+            "catboost": CatBoostClassifier(iterations=100, random_state=random_state, verbose=0, allow_writing_files=False)
         }
         
         for model_name, model in models.items():
@@ -160,7 +174,9 @@ def train_baseline_models(file_path: str, target_col: str,
             "ridge": Ridge(random_state=random_state),
             "lasso": Lasso(random_state=random_state),
             "random_forest": RandomForestRegressor(n_estimators=100, random_state=random_state, n_jobs=-1),
-            "xgboost": XGBRegressor(n_estimators=100, random_state=random_state, n_jobs=-1)
+            "xgboost": XGBRegressor(n_estimators=100, random_state=random_state, n_jobs=-1),
+            "lightgbm": LGBMRegressor(n_estimators=100, random_state=random_state, n_jobs=-1, verbose=-1),
+            "catboost": CatBoostRegressor(iterations=100, random_state=random_state, verbose=0, allow_writing_files=False)
         }
         
         for model_name, model in models.items():
@@ -224,6 +240,55 @@ def train_baseline_models(file_path: str, target_col: str,
         "score": best_score,
         "model_path": results["models"][best_model_name]["model_path"] if best_model_name else None
     }
+    
+    # Generate visualizations for best model
+    if VISUALIZATION_AVAILABLE and best_model_name:
+        try:
+            print(f"\n🎨 Generating visualizations for {best_model_name}...")
+            
+            # Load best model
+            model_data = joblib.dump({
+                "model": models[best_model_name],
+                "imputer": imputer,
+                "feature_names": numeric_cols
+            }, f"./outputs/models/{best_model_name}_temp.pkl")
+            
+            # Get predictions for visualization
+            best_model = models[best_model_name]
+            y_pred_test = best_model.predict(X_test)
+            y_pred_proba = None
+            if hasattr(best_model, "predict_proba") and task_type == "classification":
+                y_pred_proba = best_model.predict_proba(X_test)
+            
+            # Generate model performance plots
+            plot_dir = "./outputs/plots/model_performance"
+            perf_plots = generate_model_performance_plots(
+                y_true=y_test,
+                y_pred=y_pred_test,
+                y_pred_proba=y_pred_proba,
+                task_type=task_type,
+                model_name=best_model_name,
+                output_dir=plot_dir
+            )
+            results["performance_plots"] = perf_plots["plot_paths"]
+            
+            # Generate feature importance plot if available
+            if hasattr(best_model, "feature_importances_"):
+                feature_importance = dict(zip(numeric_cols, best_model.feature_importances_))
+                importance_plot = generate_feature_importance_plot(
+                    feature_importances=feature_importance,
+                    output_path=f"{plot_dir}/feature_importance_{best_model_name}.png"
+                )
+                results["feature_importance_plot"] = importance_plot
+            
+            print(f"   ✓ Generated {len(perf_plots.get('plot_paths', []))} performance plots")
+            results["visualization_generated"] = True
+            
+        except Exception as e:
+            print(f"   ⚠️ Could not generate visualizations: {str(e)}")
+            results["visualization_generated"] = False
+    else:
+        results["visualization_generated"] = False
     
     return results
 

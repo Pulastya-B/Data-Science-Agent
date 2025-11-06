@@ -975,6 +975,205 @@ TOOLS = [
                 "required": ["file_path", "date_col", "value_col", "output_path"]
             }
         }
+    },
+    
+    # ============================================
+    # ADVANCED INSIGHTS TOOLS (6) - NEW
+    # ============================================
+    
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_root_cause",
+            "description": "Perform root cause analysis to identify why a metric dropped or changed. Analyzes correlations, temporal patterns, and identifies top influencing factors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Column to analyze (e.g., 'sales')"},
+                    "time_col": {"type": "string", "description": "Optional time column for trend analysis"},
+                    "threshold_drop": {"type": "number", "description": "Percentage drop to flag as significant (default 0.15)"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_trends_and_seasonality",
+            "description": "Detect trends and seasonal patterns in time series data using statistical methods and autocorrelation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "value_col": {"type": "string", "description": "Column with values to analyze"},
+                    "time_col": {"type": "string", "description": "Column with timestamps"},
+                    "seasonal_period": {"type": "integer", "description": "Expected seasonal period (auto-detected if None)"}
+                },
+                "required": ["file_path", "value_col", "time_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_anomalies_advanced",
+            "description": "Detect anomalies with confidence scores using Isolation Forest or statistical methods.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "Columns to analyze (all numeric if None)"},
+                    "contamination": {"type": "number", "description": "Expected proportion of outliers (default 0.1)"},
+                    "method": {"type": "string", "enum": ["isolation_forest", "statistical"], "description": "Detection method"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_hypothesis_testing",
+            "description": "Perform statistical hypothesis testing (t-test, ANOVA, chi-square) to compare groups.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "group_col": {"type": "string", "description": "Column defining groups"},
+                    "value_col": {"type": "string", "description": "Column with values to compare"},
+                    "test_type": {"type": "string", "enum": ["t-test", "anova", "chi-square", "auto"], "description": "Test type (auto-detected if 'auto')"}
+                },
+                "required": ["file_path", "group_col", "value_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_distribution",
+            "description": "Analyze distribution of a column including normality tests, skewness, and kurtosis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "column": {"type": "string", "description": "Column to analyze"},
+                    "tests": {"type": "array", "items": {"type": "string"}, "description": "Tests to perform (normality, skewness)"}
+                },
+                "required": ["file_path", "column"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "perform_segment_analysis",
+            "description": "Perform cluster-based customer/data segmentation using K-means and profile each segment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "n_segments": {"type": "integer", "description": "Number of segments to create (default 5)"},
+                    "features": {"type": "array", "items": {"type": "string"}, "description": "Features for clustering (all numeric if None)"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    
+    # ============================================
+    # AUTOMATED PIPELINE TOOLS (2) - NEW
+    # ============================================
+    
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_ml_pipeline",
+            "description": "Fully automated ML pipeline: auto-detect types, clean missing values, handle outliers, encode categorical, engineer features, and select best features. Zero configuration required!",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to input dataset"},
+                    "target_col": {"type": "string", "description": "Target column name"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "Task type (auto-detected if 'auto')"},
+                    "output_path": {"type": "string", "description": "Where to save processed data"},
+                    "feature_engineering_level": {"type": "string", "enum": ["basic", "intermediate", "advanced"], "description": "Feature engineering depth"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_feature_selection",
+            "description": "Automatically select the best features for modeling using mutual information or F-statistics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Target column"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "Task type"},
+                    "max_features": {"type": "integer", "description": "Maximum features to keep (default 50)"},
+                    "method": {"type": "string", "enum": ["mutual_info", "f_test", "auto"], "description": "Selection method"},
+                    "output_path": {"type": "string", "description": "Where to save selected features"}
+                },
+                "required": ["file_path", "target_col"]
+            }
+        }
+    },
+    
+    # ============================================
+    # VISUALIZATION TOOLS (3) - NEW
+    # ============================================
+    
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_all_plots",
+            "description": "Generate ALL plots for a dataset automatically: data quality, EDA, distributions, and correlations. Creates interactive HTML plots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Optional target column"},
+                    "output_dir": {"type": "string", "description": "Directory to save plots (default ./outputs/plots)"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_data_quality_plots",
+            "description": "Generate data quality visualizations: missing values, data types, and outlier detection plots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "output_dir": {"type": "string", "description": "Directory to save plots"}
+                },
+                "required": ["file_path", "output_dir"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_eda_plots",
+            "description": "Generate exploratory data analysis plots: correlation heatmap, feature relationships, and pairplots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Optional target column"},
+                    "output_dir": {"type": "string", "description": "Directory to save plots"}
+                },
+                "required": ["file_path", "output_dir"]
+            }
+        }
     }
 ]
 
