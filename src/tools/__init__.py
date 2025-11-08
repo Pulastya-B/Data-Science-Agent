@@ -4,7 +4,8 @@
 from .data_profiling import (
     profile_dataset,
     detect_data_quality_issues,
-    analyze_correlations
+    analyze_correlations,
+    get_smart_summary  # NEW: Enhanced data summary
 )
 
 from .data_cleaning import (
@@ -16,6 +17,13 @@ from .data_cleaning import (
 from .data_type_conversion import (
     force_numeric_conversion,
     smart_type_inference
+)
+
+# Data Wrangling Tools (3) - NEW
+from .data_wrangling import (
+    merge_datasets,
+    concat_datasets,
+    reshape_dataset
 )
 
 from .feature_engineering import (
@@ -123,6 +131,23 @@ from .visualization_engine import (
     generate_feature_importance_plot
 )
 
+# Interactive Plotly Visualizations (6) - NEW PHASE 2
+from .plotly_visualizations import (
+    generate_interactive_scatter,
+    generate_interactive_histogram,
+    generate_interactive_correlation_heatmap,
+    generate_interactive_box_plots,
+    generate_interactive_time_series,
+    generate_plotly_dashboard
+)
+
+# EDA Report Generation (3) - NEW PHASE 2
+from .eda_reports import (
+    generate_sweetviz_report,
+    generate_ydata_profiling_report,
+    generate_combined_eda_report
+)
+
 from .tools_registry import TOOLS, get_tool_by_name, get_all_tool_names
 
 from tools.enhanced_feature_engineering import (
@@ -133,10 +158,11 @@ from tools.enhanced_feature_engineering import (
 )
 
 __all__ = [
-    # Basic Data Profiling (3)
+    # Basic Data Profiling (4) - UPDATED
     "profile_dataset",
     "detect_data_quality_issues",
     "analyze_correlations",
+    "get_smart_summary",  # NEW
     
     # Basic Data Cleaning (3)
     "clean_missing_values",
@@ -146,6 +172,11 @@ __all__ = [
     # Data Type Conversion (2)
     "force_numeric_conversion",
     "smart_type_inference",
+    
+    # Data Wrangling (3) - NEW
+    "merge_datasets",
+    "concat_datasets",
+    "reshape_dataset",
     
     # Basic Feature Engineering (2)
     "create_time_features",
@@ -225,6 +256,19 @@ __all__ = [
     "generate_eda_plots",
     "generate_model_performance_plots",
     "generate_feature_importance_plot",
+    
+    # Interactive Plotly Visualizations (6) - NEW PHASE 2
+    "generate_interactive_scatter",
+    "generate_interactive_histogram",
+    "generate_interactive_correlation_heatmap",
+    "generate_interactive_box_plots",
+    "generate_interactive_time_series",
+    "generate_plotly_dashboard",
+    
+    # EDA Report Generation (3) - NEW PHASE 2
+    "generate_sweetviz_report",
+    "generate_ydata_profiling_report",
+    "generate_combined_eda_report",
     
     # Enhanced Feature Engineering (4) - NEW
     "create_ratio_features",

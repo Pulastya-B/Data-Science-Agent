@@ -43,6 +43,8 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
         - memory usage
         - null counts
         - unique values
+        - missing value percentage per column (NEW)
+        - unique value counts per column (NEW)
         - basic statistics for each column
     """
     # Validation
@@ -67,12 +69,37 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
             "datetime": get_datetime_columns(df),
             "id_columns": detect_id_columns(df),
         },
-        "columns": {}
+        "columns": {},
+        "missing_values_per_column": {},  # NEW: Per-column missing %
+        "unique_counts_per_column": {}   # NEW: Per-column unique counts
     }
     
-    # Per-column statistics
+    # Per-column statistics with enhanced missing % and unique counts
     for col in df.columns:
+        # Get existing column info
         profile["columns"][col] = get_column_info(df, col)
+        
+        # NEW: Calculate missing value percentage for this column
+        null_count = df[col].null_count()
+        missing_pct = round((null_count / len(df)) * 100, 2) if len(df) > 0 else 0
+        profile["missing_values_per_column"][col] = {
+            "count": int(null_count),
+            "percentage": missing_pct
+        }
+        
+        # NEW: Calculate unique value counts (with dict handling)
+        try:
+            # Try to get unique count directly
+            unique_count = df[col].n_unique()
+            profile["unique_counts_per_column"][col] = int(unique_count)
+        except Exception as e:
+            # If column contains unhashable types (dicts, lists), handle gracefully
+            try:
+                # Convert to string and then count unique
+                unique_count = df[col].cast(pl.Utf8).n_unique()
+                profile["unique_counts_per_column"][col] = int(unique_count)
+            except:
+                profile["unique_counts_per_column"][col] = "N/A (unhashable type)"
     
     # Overall statistics
     total_nulls = sum(df[col].null_count() for col in df.columns)
@@ -87,6 +114,133 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
     }
     
     return profile
+
+
+def get_smart_summary(file_path: str, n_samples: int = 30) -> Dict[str, Any]:
+    """
+    Enhanced data summary with missing %, unique counts, and safe dict handling.
+    
+    This function provides a smarter, more LLM-friendly summary compared to profile_dataset().
+    It includes per-column missing percentages, unique value counts, and handles
+    dictionary columns gracefully (converts to strings to avoid hashing errors).
+    
+    Args:
+        file_path: Path to CSV or Parquet file
+        n_samples: Number of sample rows to include (default: 30)
+    
+    Returns:
+        Dictionary with comprehensive smart summary including:
+        - Basic shape info
+        - Column data types
+        - Missing value percentage by column (sorted by % descending)
+        - Unique value counts by column
+        - First N sample rows
+        - Descriptive statistics for numeric columns
+        - Safe handling of dictionary/unhashable columns
+    
+    Example:
+        >>> summary = get_smart_summary("data.csv")
+        >>> print(summary["missing_summary"])
+        >>> # Output: [("col_A", 45.2), ("col_B", 12.3), ...]
+    """
+    # Validation
+    validate_file_exists(file_path)
+    validate_file_format(file_path)
+    
+    # Load data
+    df = load_dataframe(file_path)
+    validate_dataframe(df)
+    
+    # Convert dictionary-type columns to strings (prevents unhashable dict errors)
+    for col in df.columns:
+        try:
+            # Try to detect if column might contain dicts/lists
+            sample = df[col].drop_nulls().head(5)
+            if len(sample) > 0:
+                first_val = sample[0]
+                # Check if it's a complex type
+                if isinstance(first_val, (dict, list)):
+                    df = df.with_columns(pl.col(col).cast(pl.Utf8).alias(col))
+        except:
+            # If any error, just continue
+            pass
+    
+    # Calculate missing value statistics (sorted by % descending)
+    missing_stats = []
+    for col in df.columns:
+        null_count = df[col].null_count()
+        null_pct = round((null_count / len(df)) * 100, 2) if len(df) > 0 else 0
+        missing_stats.append({
+            "column": col,
+            "count": int(null_count),
+            "percentage": null_pct
+        })
+    
+    # Sort by percentage descending
+    missing_stats.sort(key=lambda x: x["percentage"], reverse=True)
+    
+    # Calculate unique value counts
+    unique_counts = {}
+    for col in df.columns:
+        try:
+            unique_count = df[col].n_unique()
+            unique_counts[col] = int(unique_count)
+        except:
+            # Fallback for unhashable types
+            try:
+                unique_count = df[col].cast(pl.Utf8).n_unique()
+                unique_counts[col] = int(unique_count)
+            except:
+                unique_counts[col] = "N/A"
+    
+    # Get column data types
+    column_types = {col: str(df[col].dtype) for col in df.columns}
+    
+    # Get sample rows (first n_samples)
+    sample_data = df.head(n_samples).to_dicts()
+    
+    # Get descriptive statistics for numeric columns
+    numeric_cols = get_numeric_columns(df)
+    numeric_stats = {}
+    
+    if numeric_cols:
+        df_numeric = df.select(numeric_cols)
+        # Convert to pandas for describe() functionality
+        df_pd = df_numeric.to_pandas()
+        stats_df = df_pd.describe()
+        numeric_stats = stats_df.to_dict()
+    
+    # Build comprehensive summary
+    summary = {
+        "file_path": file_path,
+        "shape": {
+            "rows": len(df),
+            "columns": len(df.columns)
+        },
+        "column_types": column_types,
+        "missing_summary": missing_stats,  # Sorted by % descending
+        "unique_counts": unique_counts,
+        "sample_data": sample_data,
+        "numeric_statistics": numeric_stats,
+        "memory_usage_mb": calculate_memory_usage(df),
+        "summary_notes": []
+    }
+    
+    # Add helpful notes for LLM
+    high_missing_cols = [item for item in missing_stats if item["percentage"] > 40]
+    if high_missing_cols:
+        summary["summary_notes"].append(
+            f"{len(high_missing_cols)} column(s) have >40% missing values (consider dropping)"
+        )
+    
+    high_cardinality_cols = [col for col, count in unique_counts.items() 
+                            if isinstance(count, int) and count > len(df) * 0.5]
+    if high_cardinality_cols:
+        summary["summary_notes"].append(
+            f"{len(high_cardinality_cols)} column(s) have very high cardinality (>50% unique values)"
+        )
+    
+    return summary
 
 
 def detect_data_quality_issues(file_path: str) -> Dict[str, Any]:

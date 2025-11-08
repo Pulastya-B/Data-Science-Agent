@@ -30,9 +30,9 @@ from utils.validation import (
 
 
 def clean_missing_values(file_path: str, strategy, 
-                        output_path: str) -> Dict[str, Any]:
+                        output_path: str, threshold: float = 0.4) -> Dict[str, Any]:
     """
-    Handle missing values using appropriate strategies.
+    Handle missing values using appropriate strategies with smart threshold-based column dropping.
     
     Args:
         file_path: Path to CSV or Parquet file
@@ -40,9 +40,16 @@ def clean_missing_values(file_path: str, strategy,
                  or a dictionary mapping column names to strategies 
                  ('median', 'mean', 'mode', 'forward_fill', 'drop')
         output_path: Path to save cleaned dataset
+        threshold: For "auto" strategy, drop columns with missing % > threshold (default: 0.4 = 40%)
         
     Returns:
         Dictionary with cleaning report
+        
+    Auto Strategy Behavior:
+        1. Drop columns with >threshold missing (default 40%)
+        2. Impute numeric columns with median
+        3. Impute categorical columns with mode
+        4. Forward-fill for time series columns
     """
     # Validation
     validate_file_exists(file_path)
@@ -55,35 +62,64 @@ def clean_missing_values(file_path: str, strategy,
     # Get column type information
     numeric_cols = get_numeric_columns(df)
     categorical_cols = get_categorical_columns(df)
+    datetime_cols = get_datetime_columns(df)
     id_cols = detect_id_columns(df)
     
-    # Handle "auto" mode - automatically decide strategy for all columns with missing values
+    report = {
+        "original_rows": len(df),
+        "original_columns": len(df.columns),
+        "columns_dropped": [],
+        "columns_processed": {},
+        "rows_dropped": 0,
+        "threshold_used": threshold
+    }
+    
+    # Handle "auto" mode - Smart threshold-based cleaning
     if isinstance(strategy, str) and strategy == "auto":
+        # Step 1: Identify and drop high-missing columns (>threshold)
+        cols_to_drop = []
+        for col in df.columns:
+            null_count = df[col].null_count()
+            null_pct = null_count / len(df) if len(df) > 0 else 0
+            
+            if null_pct > threshold:
+                cols_to_drop.append(col)
+                report["columns_dropped"].append({
+                    "column": col,
+                    "missing_percentage": round(null_pct * 100, 2),
+                    "reason": f"Missing >{threshold*100}% of values"
+                })
+        
+        # Drop high-missing columns
+        if cols_to_drop:
+            df = df.drop(cols_to_drop)
+            print(f"🗑️  Dropped {len(cols_to_drop)} columns with >{threshold*100}% missing:")
+            for col_info in report["columns_dropped"]:
+                print(f"    - {col_info['column']} ({col_info['missing_percentage']}% missing)")
+        
+        # Step 2: Build strategy for remaining columns
         strategy = {}
         for col in df.columns:
             if df[col].null_count() > 0:
                 if col in id_cols:
-                    strategy[col] = "drop"
+                    strategy[col] = "drop"  # Drop rows with missing IDs
+                elif col in datetime_cols:
+                    strategy[col] = "forward_fill"  # Forward fill for time series
                 elif col in numeric_cols:
-                    strategy[col] = "median"
+                    strategy[col] = "median"  # Median for numeric (robust to outliers)
                 elif col in categorical_cols:
-                    strategy[col] = "mode"
+                    strategy[col] = "mode"  # Mode for categorical
                 else:
-                    strategy[col] = "drop"
-        print(f"🔧 Auto-detected strategies for {len(strategy)} columns with missing values")
-    
-    report = {
-        "original_rows": len(df),
-        "columns_processed": {},
-        "rows_dropped": 0
-    }
+                    strategy[col] = "mode"  # Default to mode
+        
+        print(f"🔧 Auto-detected strategies for {len(strategy)} remaining columns with missing values")
     
     # Process each column based on strategy
     for col, strat in strategy.items():
         if col not in df.columns:
             report["columns_processed"][col] = {
                 "status": "error",
-                "message": f"Column not found"
+                "message": f"Column not found (may have been dropped)"
             }
             continue
         
@@ -96,31 +132,31 @@ def clean_missing_values(file_path: str, strategy,
             }
             continue
         
-        # Don't impute ID columns
+        # Don't impute ID columns - drop rows instead
         if col in id_cols and strat != "drop":
             report["columns_processed"][col] = {
                 "status": "skipped",
-                "message": "ID column - not imputed"
+                "message": "ID column - not imputed (use 'drop' to remove rows)"
             }
             continue
         
-        # Auto strategy: choose based on column type
-        if strat == "auto":
-            if col in numeric_cols:
-                strat = "median"
-            elif col in categorical_cols:
-                strat = "mode"
-            else:
-                strat = "drop"
-        
         # Apply strategy
         try:
+            rows_before = len(df)
+            
             if strat == "median":
                 if col in numeric_cols:
                     median_val = df[col].median()
                     df = df.with_columns(
                         pl.col(col).fill_null(median_val).alias(col)
                     )
+                    report["columns_processed"][col] = {
+                        "status": "success",
+                        "strategy": "median",
+                        "nulls_before": int(null_count_before),
+                        "nulls_after": int(df[col].null_count()),
+                        "fill_value": float(median_val)
+                    }
                 else:
                     report["columns_processed"][col] = {
                         "status": "error",
@@ -134,6 +170,13 @@ def clean_missing_values(file_path: str, strategy,
                     df = df.with_columns(
                         pl.col(col).fill_null(mean_val).alias(col)
                     )
+                    report["columns_processed"][col] = {
+                        "status": "success",
+                        "strategy": "mean",
+                        "nulls_before": int(null_count_before),
+                        "nulls_after": int(df[col].null_count()),
+                        "fill_value": float(mean_val)
+                    }
                 else:
                     report["columns_processed"][col] = {
                         "status": "error",
@@ -147,14 +190,34 @@ def clean_missing_values(file_path: str, strategy,
                     df = df.with_columns(
                         pl.col(col).fill_null(mode_val).alias(col)
                     )
+                    report["columns_processed"][col] = {
+                        "status": "success",
+                        "strategy": "mode",
+                        "nulls_before": int(null_count_before),
+                        "nulls_after": int(df[col].null_count()),
+                        "fill_value": str(mode_val)
+                    }
             
             elif strat == "forward_fill":
                 df = df.with_columns(
                     pl.col(col).forward_fill().alias(col)
                 )
+                report["columns_processed"][col] = {
+                    "status": "success",
+                    "strategy": "forward_fill",
+                    "nulls_before": int(null_count_before),
+                    "nulls_after": int(df[col].null_count())
+                }
             
             elif strat == "drop":
                 df = df.filter(pl.col(col).is_not_null())
+                rows_after = len(df)
+                report["columns_processed"][col] = {
+                    "status": "success",
+                    "strategy": "drop",
+                    "nulls_before": int(null_count_before),
+                    "rows_dropped": rows_before - rows_after
+                }
             
             else:
                 report["columns_processed"][col] = {
@@ -162,16 +225,6 @@ def clean_missing_values(file_path: str, strategy,
                     "message": f"Unknown strategy: {strat}"
                 }
                 continue
-            
-            null_count_after = df[col].null_count()
-            
-            report["columns_processed"][col] = {
-                "status": "success",
-                "strategy": strat,
-                "nulls_before": int(null_count_before),
-                "nulls_after": int(null_count_after),
-                "nulls_handled": int(null_count_before - null_count_after)
-            }
         
         except Exception as e:
             report["columns_processed"][col] = {
@@ -180,12 +233,19 @@ def clean_missing_values(file_path: str, strategy,
             }
     
     report["final_rows"] = len(df)
+    report["final_columns"] = len(df.columns)
     report["rows_dropped"] = report["original_rows"] - report["final_rows"]
+    report["columns_dropped_count"] = len(report["columns_dropped"])
     
     # Save cleaned dataset
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     save_dataframe(df, output_path)
     report["output_path"] = output_path
+    
+    # Summary message
+    report["message"] = f"Cleaned {report['original_rows']} rows → {report['final_rows']} rows. "
+    report["message"] += f"Dropped {report['columns_dropped_count']} columns. "
+    report["message"] += f"Processed {len([c for c in report['columns_processed'].values() if c['status'] == 'success'])} columns."
     
     return report
 

@@ -528,18 +528,18 @@ def engineer_text_features(
 def auto_feature_engineering(
     file_path: str,
     target_col: str,
-    groq_api_key: str,
+    groq_api_key: Optional[str] = None,
     max_suggestions: int = 10,
     implement_top_k: int = 5,
     output_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Use Groq LLM to automatically generate and implement feature engineering ideas.
+    Use LLM (Groq or Gemini) to automatically generate and implement feature engineering ideas.
     
     Args:
         file_path: Path to dataset
         target_col: Target column name
-        groq_api_key: Groq API key
+        groq_api_key: Groq API key (optional - will try to use environment variable or Gemini)
         max_suggestions: Maximum number of feature suggestions to generate
         implement_top_k: Number of top suggestions to implement
         output_path: Path to save dataset with new features
@@ -547,7 +547,7 @@ def auto_feature_engineering(
     Returns:
         Dictionary with feature suggestions and implementation results
     """
-    from groq import Groq
+    import os
     
     # Validation
     validate_file_exists(file_path)
@@ -565,7 +565,7 @@ def auto_feature_engineering(
     # Sample data for analysis
     sample_df = df.head(5)
     
-    # Create prompt for Groq
+    # Create prompt for LLM
     prompt = f"""You are a data science expert. Analyze this dataset and suggest {max_suggestions} creative feature engineering ideas.
 
 Dataset Overview:
@@ -595,22 +595,56 @@ Format your response as JSON:
 }}
 """
     
-    print("🤖 Asking Groq for feature engineering suggestions...")
+    print("🤖 Asking LLM for feature engineering suggestions...")
+    
+    # Try multiple LLM providers in order of preference
+    llm_response = None
+    
+    # Try Groq first if API key provided
+    if groq_api_key or os.getenv("GROQ_API_KEY"):
+        try:
+            from groq import Groq
+            api_key = groq_api_key or os.getenv("GROQ_API_KEY")
+            client = Groq(api_key=api_key)
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=2000
+            )
+            llm_response = response.choices[0].message.content
+            print("   ✓ Using Groq LLM")
+        except Exception as e:
+            print(f"   ⚠️ Groq failed: {str(e)}, trying Gemini...")
+    
+    # Try Gemini if Groq failed or not available
+    if not llm_response and os.getenv("GEMINI_API_KEY"):
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            response = model.generate_content(prompt)
+            llm_response = response.text
+            print("   ✓ Using Gemini LLM")
+        except Exception as e:
+            print(f"   ⚠️ Gemini failed: {str(e)}")
+    
+    if not llm_response:
+        return {
+            "status": "error",
+            "message": "No LLM API key available. Set GROQ_API_KEY or GEMINI_API_KEY environment variable."
+        }
     
     try:
-        client = Groq(api_key=groq_api_key)
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=2000
-        )
-        
-        suggestions_text = response.choices[0].message.content
-        
         # Parse JSON response
         import json
-        suggestions = json.loads(suggestions_text)
+        # Extract JSON from response (might be wrapped in markdown code blocks)
+        if "```json" in llm_response:
+            llm_response = llm_response.split("```json")[1].split("```")[0].strip()
+        elif "```" in llm_response:
+            llm_response = llm_response.split("```")[1].split("```")[0].strip()
+        
+        suggestions = json.loads(llm_response)
         
         # Implement top K suggestions
         df_new = df.clone()

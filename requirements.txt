@@ -28,9 +28,14 @@ statsmodels==0.14.1
 # Visualization
 matplotlib==3.8.2
 seaborn==0.13.1
+plotly==5.18.0  # NEW PHASE 2: Interactive visualizations
+
+# EDA Report Generation (NEW PHASE 2)
+sweetviz==2.3.1  # Beautiful fast EDA reports
+ydata-profiling==4.6.4  # Comprehensive detailed profiling (formerly pandas-profiling)
 
 # User Interface
-gradio>=4.0,<5.0
+gradio==5.49.1
 
 # Text Processing
 textblob==0.17.1
@@ -55,7 +60,7 @@ fairlearn==0.10.0
 # torch==2.1.0  # For CNN-based image feature extraction
 # torchvision==0.16.0  # For pre-trained models (ResNet, EfficientNet, VGG)
 Pillow==10.1.0  # For basic image processing
-opencv-python==4.8.1  # For advanced image processing & color features
+#opencv-python==4.8.1  # For advanced image processing & color features
 
 # Business Intelligence (Optional - Uncomment for advanced BI tools)
 # These are optional but add specialized capabilities

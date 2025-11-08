@@ -41,7 +41,7 @@ last_agent_response = None  # Store last agent response for visualization extrac
 
 
 def analyze_dataset(file, user_message, history):
-    """Process uploaded dataset and user message."""
+    """Process uploaded dataset(s) and user message. Supports single or multiple file uploads."""
     global current_file, current_profile, last_agent_response
     
     # Initialize with empty plot list (will collect PNG file paths)
@@ -55,71 +55,145 @@ def analyze_dataset(file, user_message, history):
     print(f"[DEBUG] analyze_dataset called - file: {file is not None}, message: '{user_message}', current_file: {current_file}")
     
     try:
-        # If a new file is uploaded (and it's different from current)
-        if file is not None and (current_file is None or file.name != current_file):
-            print(f"[DEBUG] Processing new file upload: {file.name}")
+        # Handle file uploads (single or multiple)
+        if file is not None:
+            # file can be a single filepath or a list of filepaths
+            files_to_process = file if isinstance(file, list) else [file]
             
-            # Copy the uploaded file to a simpler path to avoid issues with long temp paths
-            import shutil
-            os.makedirs("./temp", exist_ok=True)
-            simple_filename = Path(file.name).name
-            simple_path = f"./temp/{simple_filename}"
-            shutil.copy2(file.name, simple_path)
-            current_file = simple_path
-            print(f"[DEBUG] Copied file to simpler path: {current_file}")
+            # Filter out None values
+            files_to_process = [f for f in files_to_process if f is not None]
             
-            # Only show file upload response if there's no user message
-            if not (user_message and user_message.strip()):
-                # Profile the dataset
-                response = f"📊 **Dataset Uploaded Successfully!**\n\n"
-                response += f"**File:** {Path(current_file).name}\n\n"
+            if len(files_to_process) > 0:
+                print(f"[DEBUG] Processing {len(files_to_process)} file(s) upload")
                 
-                # Get basic profile
-                profile = profile_dataset(current_file)
-                current_profile = profile
+                # Copy all files to simpler paths
+                os.makedirs("./temp", exist_ok=True)
+                processed_files = []
+                seen_files = {}  # Track files by content hash to detect duplicates
+                duplicate_count = 0
                 
-                response += f"**Dataset Overview:**\n"
-                response += f"- Rows: {profile['shape']['rows']:,}\n"
-                response += f"- Columns: {profile['shape']['columns']}\n"
+                for uploaded_file in files_to_process:
+                    simple_filename = Path(uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file).name
+                    file_source = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
+                    
+                    # Calculate file hash to detect duplicates (even with different names)
+                    import hashlib
+                    hasher = hashlib.md5()
+                    with open(file_source, 'rb') as f:
+                        # Read file in chunks to handle large files efficiently
+                        for chunk in iter(lambda: f.read(8192), b""):
+                            hasher.update(chunk)
+                    file_hash = hasher.hexdigest()
+                    
+                    # Check if this exact file was already uploaded
+                    if file_hash in seen_files:
+                        print(f"[DEBUG] Duplicate file detected: {simple_filename} (same as {seen_files[file_hash]})")
+                        duplicate_count += 1
+                        continue  # Skip duplicate
+                    
+                    # Not a duplicate - process it
+                    simple_path = f"./temp/{simple_filename}"
+                    
+                    # Handle filename collision (different files with same name)
+                    if os.path.exists(simple_path):
+                        # Check if existing file is the same (by comparing with already processed files)
+                        existing_in_processed = simple_path in processed_files
+                        if not existing_in_processed:
+                            # Different file with same name - add suffix
+                            base_name = Path(simple_filename).stem
+                            extension = Path(simple_filename).suffix
+                            counter = 1
+                            while os.path.exists(f"./temp/{base_name}_{counter}{extension}"):
+                                counter += 1
+                            simple_filename = f"{base_name}_{counter}{extension}"
+                            simple_path = f"./temp/{simple_filename}"
+                            print(f"[DEBUG] Filename collision - renamed to: {simple_filename}")
+                    
+                    shutil.copy2(file_source, simple_path)
+                    processed_files.append(simple_path)
+                    seen_files[file_hash] = simple_filename
+                    print(f"[DEBUG] Copied file to: {simple_path}")
                 
-                # Handle memory_usage (can be float or dict)
-                memory = profile.get('memory_usage', 0)
-                if isinstance(memory, dict):
-                    memory = memory.get('total_mb', 0)
-                response += f"- Memory: {memory:.2f} MB\n\n"
+                # Set current_file to the first file (for single-file operations)
+                # For multi-file operations, the agent will use all files from ./temp/
+                current_file = processed_files[0] if processed_files else None
                 
-                response += f"**Column Types:**\n"
-                response += f"- Numeric: {len(profile['column_types']['numeric'])} columns\n"
-                response += f"- Categorical: {len(profile['column_types']['categorical'])} columns\n"
-                response += f"- Datetime: {len(profile['column_types']['datetime'])} columns\n\n"
-                
-                # Check data quality
-                quality = detect_data_quality_issues(current_file)
-                if quality['critical']:
-                    response += f"🔴 **Critical Issues:** {len(quality['critical'])}\n"
-                    for issue in quality['critical'][:3]:
-                        response += f"  - {issue['message']}\n"
-                if quality['warning']:
-                    response += f"🟡 **Warnings:** {len(quality['warning'])}\n"
-                    for issue in quality['warning'][:3]:
-                        response += f"  - {issue['message']}\n"
-                
-                response += f"\n\n💬 **What would you like to do with this dataset?**\n\n"
-                response += "You can ask me to:\n"
-                response += "- Train a classification or regression model\n"
-                response += "- Analyze specific columns\n"
-                response += "- Detect outliers\n"
-                response += "- Engineer features\n"
-                response += "- Generate predictions\n"
-                response += "- And much more!\n"
-                
-                # Add or replace message in history
-                if history and len(history) > 0 and history[-1][0] is None:
-                    history[-1] = (None, response)
-                else:
-                    history.append((None, response))
-                yield history, "", []
-                return
+                # Only show file upload response if there's no user message
+                if not (user_message and user_message.strip()):
+                    if len(processed_files) == 0:
+                        # All files were duplicates
+                        response = f"⚠️ **No New Files Uploaded**\n\n"
+                        response += f"All {len(files_to_process)} file(s) were duplicates of already uploaded files.\n\n"
+                        response += "Your previously uploaded dataset is still active."
+                    elif len(processed_files) == 1:
+                        # Single file upload - show detailed profile
+                        response = f"📊 **Dataset Uploaded Successfully!**\n\n"
+                        if duplicate_count > 0:
+                            response += f"ℹ️ *({duplicate_count} duplicate file(s) were skipped)*\n\n"
+                        response += f"**File:** {Path(current_file).name}\n\n"
+                        
+                        # Get basic profile
+                        profile = profile_dataset(current_file)
+                        current_profile = profile
+                        
+                        response += f"**Dataset Overview:**\n"
+                        response += f"- Rows: {profile['shape']['rows']:,}\n"
+                        response += f"- Columns: {profile['shape']['columns']}\n"
+                        
+                        # Handle memory_usage (can be float or dict)
+                        memory = profile.get('memory_usage', 0)
+                        if isinstance(memory, dict):
+                            memory = memory.get('total_mb', 0)
+                        response += f"- Memory: {memory:.2f} MB\n\n"
+                        
+                        response += f"**Column Types:**\n"
+                        response += f"- Numeric: {len(profile['column_types']['numeric'])} columns\n"
+                        response += f"- Categorical: {len(profile['column_types']['categorical'])} columns\n"
+                        response += f"- Datetime: {len(profile['column_types']['datetime'])} columns\n\n"
+                        
+                        # Check data quality
+                        quality = detect_data_quality_issues(current_file)
+                        if quality['critical']:
+                            response += f"🔴 **Critical Issues:** {len(quality['critical'])}\n"
+                            for issue in quality['critical'][:3]:
+                                response += f"  - {issue['message']}\n"
+                        if quality['warning']:
+                            response += f"🟡 **Warnings:** {len(quality['warning'])}\n"
+                            for issue in quality['warning'][:3]:
+                                response += f"  - {issue['message']}\n"
+                    else:
+                        # Multiple files uploaded
+                        response = f"📊 **{len(processed_files)} Datasets Uploaded Successfully!**\n\n"
+                        if duplicate_count > 0:
+                            response += f"ℹ️ *({duplicate_count} duplicate file(s) were skipped)*\n\n"
+                        response += f"**Files:**\n"
+                        for i, fp in enumerate(processed_files, 1):
+                            response += f"{i}. {Path(fp).name}\n"
+                        response += f"\n**💡 You can now use multi-dataset operations!**\n\n"
+                    
+                    response += f"\n\n💬 **What would you like to do with {'this dataset' if len(processed_files) == 1 else 'these datasets'}?**\n\n"
+                    response += "You can ask me to:\n"
+                    if len(processed_files) > 1:
+                        response += "- **Merge these datasets** (e.g., 'merge customers and orders on customer_id')\n"
+                        response += "- **Combine/concatenate** them (e.g., 'combine all monthly sales files')\n"
+                    response += "- Train a classification or regression model\n"
+                    response += "- Analyze specific columns\n"
+                    response += "- Detect outliers\n"
+                    response += "- Engineer features\n"
+                    response += "- Generate predictions\n"
+                    response += "- And much more!\n"
+                    
+                    # Add or replace message in history
+                    if history and len(history) > 0 and history[-1][0] is None:
+                        history[-1] = (None, response)
+                    else:
+                        history.append((None, response))
+                    yield history, "", []
+                    return
+                # If user uploaded file AND sent a message, don't return - continue to process the message
+                elif user_message and user_message.strip():
+                    # Continue processing the message below
+                    pass
         
         # If user sends a message about the current file
         print(f"[DEBUG] Checking message conditions: user_message={bool(user_message and user_message.strip())}, current_file={bool(current_file)}")
@@ -696,8 +770,9 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
             
             with gr.Row():
                 file_upload = gr.File(
-                    label="📁 Upload Dataset (CSV/Parquet)",
+                    label="📁 Upload Dataset(s) (CSV/Parquet) - Single or Multiple Files",
                     file_types=[".csv", ".parquet"],
+                    file_count="multiple",  # Allow multiple file uploads
                     type="filepath"
                 )
             

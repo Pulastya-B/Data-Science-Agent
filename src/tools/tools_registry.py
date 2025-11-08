@@ -1,11 +1,11 @@
 """
-Complete Tools Registry for Groq Function Calling - All 44 Tools
+Complete Tools Registry for Groq Function Calling - All 67 Tools
 Defines all available tools in Groq's function calling format.
 """
 
 TOOLS = [
     # ============================================
-    # BASIC TOOLS (10)
+    # BASIC TOOLS (16)
     # ============================================
     
     # Data Profiling Tools (3)
@@ -70,7 +70,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "clean_missing_values",
-            "description": "Handle missing values using appropriate strategies based on column type. Strategies include median/mean for numeric, mode for categorical, forward_fill for time series, or drop. Will not impute ID columns.",
+            "description": "Handle missing values using appropriate strategies based on column type. Strategies include median/mean for numeric, mode for categorical, forward_fill for time series, or drop. In 'auto' mode, first drops columns with >threshold missing (default 40%), then imputes remaining columns. Will not impute ID columns.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -83,7 +83,7 @@ TOOLS = [
                             {
                                 "type": "string",
                                 "enum": ["auto"],
-                                "description": "Use 'auto' to automatically decide strategies for all columns based on data type"
+                                "description": "Use 'auto' to automatically decide strategies for all columns based on data type. First drops columns with >threshold missing, then imputes remaining columns."
                             },
                             {
                                 "type": "object",
@@ -96,6 +96,10 @@ TOOLS = [
                     "output_path": {
                         "type": "string",
                         "description": "Path to save cleaned dataset"
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "For 'auto' mode: drop columns with missing percentage above this threshold (default: 0.4 = 40%). Range: 0.0 to 1.0. For example, 0.7 means drop columns with >70% missing values."
                     }
                 },
                 "required": ["file_path", "strategy", "output_path"]
@@ -248,7 +252,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "encode_categorical",
-            "description": "Encode categorical variables using one-hot encoding, target encoding, or frequency encoding. Handles high-cardinality columns intelligently.",
+            "description": "Encode categorical variables using one-hot encoding, target encoding, or frequency encoding. Handles high-cardinality columns intelligently. Use method='auto' to automatically choose the best encoding.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -259,12 +263,12 @@ TOOLS = [
                     "method": {
                         "type": "string",
                         "enum": ["one_hot", "target", "frequency", "auto"],
-                        "description": "Encoding method to use"
+                        "description": "Encoding method to use. 'auto' automatically selects the best method."
                     },
                     "columns": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of categorical columns to encode. Use 'all' to encode all categorical columns."
+                        "description": "List of categorical columns to encode. Use ['all'] to encode all categorical columns. If not specified, defaults to all categorical columns."
                     },
                     "target_col": {
                         "type": "string",
@@ -275,7 +279,7 @@ TOOLS = [
                         "description": "Path to save dataset with encoded features"
                     }
                 },
-                "required": ["file_path", "method", "columns", "output_path"]
+                "required": ["file_path", "output_path"]
             }
         }
     },
@@ -341,6 +345,149 @@ TOOLS = [
                     }
                 },
                 "required": ["model_path", "test_data_path", "target_col", "output_path"]
+            }
+        }
+    },
+    
+    # New Data Wrangling Tools (3)
+    {
+        "type": "function",
+        "function": {
+            "name": "get_smart_summary",
+            "description": "Generate an LLM-friendly smart summary of a dataset with per-column missing value percentages (sorted by severity), unique value counts, sample data, and numeric statistics. Much more detailed than profile_dataset for decision-making.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the CSV or Parquet file to summarize"
+                    },
+                    "n_samples": {
+                        "type": "integer",
+                        "description": "Number of sample rows to include in the summary (default: 5)"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "merge_datasets",
+            "description": "Merge two datasets using SQL-like join operations (inner, left, right, outer, cross). Supports joining on single or multiple columns with same or different names. Automatically handles duplicate columns with suffixes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "left_path": {
+                        "type": "string",
+                        "description": "Path to the left (first) dataset file"
+                    },
+                    "right_path": {
+                        "type": "string",
+                        "description": "Path to the right (second) dataset file"
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Path to save the merged dataset"
+                    },
+                    "how": {
+                        "type": "string",
+                        "enum": ["inner", "left", "right", "outer", "cross"],
+                        "description": "Join type: 'inner' (only matching rows), 'left' (all left + matching right), 'right' (all right + matching left), 'outer' (all rows from both), 'cross' (cartesian product)"
+                    },
+                    "on": {
+                        "type": ["string", "array"],
+                        "items": {"type": "string"},
+                        "description": "Column name(s) to join on (must exist in both datasets). Can be a single column name or list of columns. Use this when join columns have the same name in both datasets."
+                    },
+                    "left_on": {
+                        "type": ["string", "array"],
+                        "items": {"type": "string"},
+                        "description": "Column name(s) in left dataset to join on. Use with right_on when join columns have different names."
+                    },
+                    "right_on": {
+                        "type": ["string", "array"],
+                        "items": {"type": "string"},
+                        "description": "Column name(s) in right dataset to join on. Use with left_on when join columns have different names."
+                    }
+                },
+                "required": ["left_path", "right_path", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "concat_datasets",
+            "description": "Concatenate multiple datasets either vertically (stacking rows, useful for monthly data) or horizontally (adding columns side-by-side). Validates schema compatibility for vertical concat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of paths to dataset files to concatenate (minimum 2 files)"
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Path to save the concatenated dataset"
+                    },
+                    "axis": {
+                        "type": "string",
+                        "enum": ["vertical", "horizontal"],
+                        "description": "'vertical' to stack rows (union, for monthly data), 'horizontal' to add columns side-by-side (default: 'vertical')"
+                    }
+                },
+                "required": ["file_paths", "output_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reshape_dataset",
+            "description": "Transform dataset structure using pivot (long→wide format), melt (wide→long format), or transpose (swap rows and columns) operations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the dataset file to reshape"
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Path to save the reshaped dataset"
+                    },
+                    "operation": {
+                        "type": "string",
+                        "enum": ["pivot", "melt", "transpose"],
+                        "description": "Reshape operation: 'pivot' (long→wide, requires index/columns/values), 'melt' (wide→long, requires id_vars/value_vars), 'transpose' (swap rows/columns)"
+                    },
+                    "index": {
+                        "type": "string",
+                        "description": "Column to use as row index (for pivot operation)"
+                    },
+                    "columns": {
+                        "type": "string",
+                        "description": "Column whose values become new column names (for pivot operation)"
+                    },
+                    "values": {
+                        "type": "string",
+                        "description": "Column whose values populate the pivoted table (for pivot operation)"
+                    },
+                    "id_vars": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Columns to keep as identifiers (for melt operation)"
+                    },
+                    "value_vars": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Columns to unpivot (for melt operation). If not specified, uses all columns except id_vars."
+                    }
+                },
+                "required": ["file_path", "output_path", "operation"]
             }
         }
     },
@@ -493,15 +640,16 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "auto_feature_engineering",
-            "description": "Automatically engineer features using genetic programming (TPOT) or feature tools. Creates best feature combinations.",
+            "description": "Use LLM (Gemini/Groq) to automatically generate creative feature engineering ideas and implement them. Works without API key if environment variables are set.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Path to dataset"},
                     "target_col": {"type": "string", "description": "Target column name"},
-                    "max_features": {"type": "integer", "description": "Maximum features to generate (default: 20)"},
-                    "time_budget": {"type": "integer", "description": "Time budget in minutes (default: 10)"},
-                    "output_path": {"type": "string", "description": "Path to save enhanced dataset"}
+                    "groq_api_key": {"type": "string", "description": "Groq API key (optional - uses environment variable if not provided)"},
+                    "max_suggestions": {"type": "integer", "description": "Maximum feature suggestions to generate (default: 10)"},
+                    "implement_top_k": {"type": "integer", "description": "Number of top suggestions to implement (default: 5)"},
+                    "output_path": {"type": "string", "description": "Path to save dataset with new features"}
                 },
                 "required": ["file_path", "target_col", "output_path"]
             }
@@ -1174,6 +1322,164 @@ TOOLS = [
                 "required": ["file_path", "output_dir"]
             }
         }
+    },
+    
+    # ============================================
+    # INTERACTIVE PLOTLY VISUALIZATIONS (6)
+    # ============================================
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_scatter",
+            "description": "Create interactive scatter plot with zoom, pan, and hover capabilities. Great for exploring relationships between variables.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "x_col": {"type": "string", "description": "Column for X-axis"},
+                    "y_col": {"type": "string", "description": "Column for Y-axis"},
+                    "color_col": {"type": "string", "description": "Optional column for color coding points"},
+                    "size_col": {"type": "string", "description": "Optional column for bubble size"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file (default: ./outputs/plots/interactive/scatter.html)"}
+                },
+                "required": ["file_path", "x_col", "y_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_histogram",
+            "description": "Create interactive histogram with box plot overlay. Users can explore distribution interactively.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "column": {"type": "string", "description": "Column to plot distribution"},
+                    "bins": {"type": "integer", "description": "Number of bins (default: 30)"},
+                    "color_col": {"type": "string", "description": "Optional column for grouped histograms"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file"}
+                },
+                "required": ["file_path", "column"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_correlation_heatmap",
+            "description": "Create interactive correlation heatmap with hover values. Better than static matplotlib version.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_box_plots",
+            "description": "Create interactive box plots for outlier detection. Supports grouping by categorical variable.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "Columns to plot (all numeric if not specified)"},
+                    "group_by": {"type": "string", "description": "Optional categorical column for grouping"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_time_series",
+            "description": "Create interactive time series plot with range slider and zoom. Perfect for temporal data analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "time_col": {"type": "string", "description": "Column with datetime values"},
+                    "value_cols": {"type": "array", "items": {"type": "string"}, "description": "Columns to plot over time"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file"}
+                },
+                "required": ["file_path", "time_col", "value_cols"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_plotly_dashboard",
+            "description": "Generate complete interactive dashboard with multiple visualizations: correlation heatmap, box plots, scatter plots, histograms. One-stop visualization solution.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to dataset"},
+                    "target_col": {"type": "string", "description": "Optional target column for supervised analysis"},
+                    "output_dir": {"type": "string", "description": "Directory to save all plots (default: ./outputs/plots/interactive)"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    # EDA Report Generation (3) - NEW PHASE 2
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_sweetviz_report",
+            "description": "Generate beautiful HTML EDA report using Sweetviz. Creates stunning visualizations with target analysis, feature distributions, correlations, missing values. Fast and visually appealing. Supports dataset comparison (train vs test).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the dataset CSV/Parquet file"},
+                    "output_path": {"type": "string", "description": "Where to save HTML report (default: ./outputs/reports/sweetviz_report.html)"},
+                    "target_column": {"type": "string", "description": "Optional target variable for association analysis"},
+                    "compare_file_path": {"type": "string", "description": "Optional second dataset to compare (e.g., train vs test)"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_ydata_profiling_report",
+            "description": "Generate comprehensive HTML report using ydata-profiling (formerly pandas-profiling). Provides extensive analysis: overview, variable statistics, interactions, correlations (Pearson, Spearman, Cramér's V), missing values matrix, duplicate analysis, and more. Most detailed profiling tool.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the dataset CSV/Parquet file"},
+                    "output_path": {"type": "string", "description": "Where to save HTML report (default: ./outputs/reports/ydata_profile.html)"},
+                    "minimal": {"type": "boolean", "description": "If true, generates faster minimal report (useful for large datasets, default: false)"},
+                    "title": {"type": "string", "description": "Report title (default: 'Data Profiling Report')"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_combined_eda_report",
+            "description": "Generate BOTH Sweetviz and ydata-profiling reports in one call. Best of both worlds: Sweetviz for beautiful fast visualizations + ydata-profiling for comprehensive detailed analysis. Recommended for complete EDA.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the dataset CSV/Parquet file"},
+                    "output_dir": {"type": "string", "description": "Directory to save both reports (default: ./outputs/reports)"},
+                    "target_column": {"type": "string", "description": "Optional target variable for Sweetviz analysis"},
+                    "minimal": {"type": "boolean", "description": "If true, uses minimal mode for ydata-profiling (default: false)"}
+                },
+                "required": ["file_path"]
+            }
+        }
     }
 ]
 
@@ -1194,14 +1500,14 @@ def get_all_tool_names() -> list:
 def get_tools_by_category() -> dict:
     """Get tools organized by category."""
     return {
-        "basic": [t["function"]["name"] for t in TOOLS[:10]],
-        "advanced_analysis": [t["function"]["name"] for t in TOOLS[10:15]],
-        "advanced_feature_engineering": [t["function"]["name"] for t in TOOLS[15:19]],
-        "advanced_preprocessing": [t["function"]["name"] for t in TOOLS[19:22]],
-        "advanced_training": [t["function"]["name"] for t in TOOLS[22:25]],
-        "business_intelligence": [t["function"]["name"] for t in TOOLS[25:29]],
-        "computer_vision": [t["function"]["name"] for t in TOOLS[29:32]],
-        "nlp_text_analytics": [t["function"]["name"] for t in TOOLS[32:36]],
-        "production_mlops": [t["function"]["name"] for t in TOOLS[36:41]],
-        "time_series": [t["function"]["name"] for t in TOOLS[41:44]]
+        "basic": [t["function"]["name"] for t in TOOLS[:16]],
+        "advanced_analysis": [t["function"]["name"] for t in TOOLS[16:21]],
+        "advanced_feature_engineering": [t["function"]["name"] for t in TOOLS[21:25]],
+        "advanced_preprocessing": [t["function"]["name"] for t in TOOLS[25:28]],
+        "advanced_training": [t["function"]["name"] for t in TOOLS[28:31]],
+        "business_intelligence": [t["function"]["name"] for t in TOOLS[31:35]],
+        "computer_vision": [t["function"]["name"] for t in TOOLS[35:38]],
+        "nlp_text_analytics": [t["function"]["name"] for t in TOOLS[38:42]],
+        "production_mlops": [t["function"]["name"] for t in TOOLS[42:47]],
+        "time_series": [t["function"]["name"] for t in TOOLS[47:50]]
     }

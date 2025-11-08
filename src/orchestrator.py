@@ -18,10 +18,11 @@ from dotenv import load_dotenv
 from cache.cache_manager import CacheManager
 from tools.tools_registry import TOOLS, get_all_tool_names, get_tools_by_category
 from tools import (
-    # Basic Tools (10)
+    # Basic Tools (13) - UPDATED: Added get_smart_summary + 3 wrangling tools
     profile_dataset,
     detect_data_quality_issues,
     analyze_correlations,
+    get_smart_summary,  # NEW
     clean_missing_values,
     handle_outliers,
     fix_data_types,
@@ -31,6 +32,10 @@ from tools import (
     encode_categorical,
     train_baseline_models,
     generate_model_report,
+    # Data Wrangling Tools (3) - NEW
+    merge_datasets,
+    concat_datasets,
+    reshape_dataset,
     # Advanced Analysis (5)
     perform_eda_analysis,
     detect_model_issues,
@@ -90,6 +95,17 @@ from tools import (
     generate_eda_plots,
     generate_model_performance_plots,
     generate_feature_importance_plot,
+    # Interactive Plotly Visualizations (6) - NEW PHASE 2
+    generate_interactive_scatter,
+    generate_interactive_histogram,
+    generate_interactive_correlation_heatmap,
+    generate_interactive_box_plots,
+    generate_interactive_time_series,
+    generate_plotly_dashboard,
+    # EDA Report Generation (3) - NEW PHASE 2
+    generate_sweetviz_report,
+    generate_ydata_profiling_report,
+    generate_combined_eda_report,
     # Enhanced Feature Engineering (4)
     create_ratio_features,
     create_statistical_features,
@@ -181,12 +197,13 @@ class DataScienceCopilot:
         Path("./outputs/data").mkdir(exist_ok=True)
     
     def _build_tool_functions_map(self) -> Dict[str, callable]:
-        """Build mapping of tool names to their functions - All 63 tools."""
+        """Build mapping of tool names to their functions - All 75 tools."""
         return {
-            # Basic Tools (10)
+            # Basic Tools (13) - UPDATED: Added 4 new tools
             "profile_dataset": profile_dataset,
             "detect_data_quality_issues": detect_data_quality_issues,
             "analyze_correlations": analyze_correlations,
+            "get_smart_summary": get_smart_summary,  # NEW
             "clean_missing_values": clean_missing_values,
             "handle_outliers": handle_outliers,
             "fix_data_types": fix_data_types,
@@ -196,6 +213,10 @@ class DataScienceCopilot:
             "encode_categorical": encode_categorical,
             "train_baseline_models": train_baseline_models,
             "generate_model_report": generate_model_report,
+            # Data Wrangling Tools (3) - NEW
+            "merge_datasets": merge_datasets,
+            "concat_datasets": concat_datasets,
+            "reshape_dataset": reshape_dataset,
             # Advanced Analysis (5)
             "perform_eda_analysis": perform_eda_analysis,
             "detect_model_issues": detect_model_issues,
@@ -255,6 +276,17 @@ class DataScienceCopilot:
             "generate_eda_plots": generate_eda_plots,
             "generate_model_performance_plots": generate_model_performance_plots,
             "generate_feature_importance_plot": generate_feature_importance_plot,
+            # Interactive Plotly Visualizations (6) - NEW PHASE 2
+            "generate_interactive_scatter": generate_interactive_scatter,
+            "generate_interactive_histogram": generate_interactive_histogram,
+            "generate_interactive_correlation_heatmap": generate_interactive_correlation_heatmap,
+            "generate_interactive_box_plots": generate_interactive_box_plots,
+            "generate_interactive_time_series": generate_interactive_time_series,
+            "generate_plotly_dashboard": generate_plotly_dashboard,
+            # EDA Report Generation (3) - NEW PHASE 2
+            "generate_sweetviz_report": generate_sweetviz_report,
+            "generate_ydata_profiling_report": generate_ydata_profiling_report,
+            "generate_combined_eda_report": generate_combined_eda_report,
             # Enhanced Feature Engineering (4)
             "create_ratio_features": create_ratio_features,
             "create_statistical_features": create_statistical_features,
@@ -279,17 +311,22 @@ class DataScienceCopilot:
 6. force_numeric_conversion(latest, columns=["all"], output="./outputs/data/numeric.csv", errors="coerce")
 7. encode_categorical(latest, method="auto", output="./outputs/data/encoded.csv")
 8. generate_eda_plots(encoded, target_col, output_dir="./outputs/plots/eda") - Generate EDA visualizations
-9. **train_baseline_models**(encoded, target_col, task_type="auto") ← REQUIRED! DO NOT SKIP!
-10. analyze_distribution(encoded, target_col) - Analyze target distribution
-11. STOP after analysis completes - All visualizations are auto-generated during training
+9. **ONLY IF USER EXPLICITLY REQUESTED ML**: train_baseline_models(encoded, target_col, task_type="auto")
+10. **AFTER TRAINING (if done)**: generate_combined_eda_report(encoded, target_col, output_dir="./outputs/reports") - Generate comprehensive HTML reports
+11. **IF USER REQUESTED GRAPHS**: generate_plotly_dashboard(encoded, target_col, output_dir="./outputs/plots/interactive") - Interactive visualizations
+12. STOP when the user's request is fulfilled
 
 **CRITICAL RULES:**
 - DO NOT repeat profile_dataset or detect_data_quality_issues multiple times
-- After encode_categorical, IMMEDIATELY call train_baseline_models
 - DO NOT call smart_type_inference after encoding - data is ready
-- Training is the GOAL - do not analyze endlessly, just TRAIN
+- **ALWAYS generate EDA reports after training** using generate_combined_eda_report
+- **If user mentions "graphs", "charts", "visualizations"**: Use generate_plotly_dashboard for interactive plots
+- **ONLY train models when user explicitly asks with keywords**: "train", "predict", "model", "classification", "regression", "forecast", "build a model"
+- **For analysis/exploration requests ONLY**: Stop after EDA plots - DO NOT train models
+- **Read user intent carefully**: "analyze" ≠ "train", "show insights" ≠ "predict"
+- **When target column is unclear**: Ask user before training
 
-**KEY TOOLS (63 total available via function calling):**
+**KEY TOOLS (75 total available via function calling):**
 - force_numeric_conversion: Converts string columns to numeric (auto-detects, skips text)
 - clean_missing_values: "auto" mode supported
 - encode_categorical: one-hot/target/frequency encoding
@@ -298,25 +335,73 @@ class DataScienceCopilot:
 - NEW Advanced Insights: analyze_root_cause, detect_trends_and_seasonality, detect_anomalies_advanced, perform_hypothesis_testing, analyze_distribution, perform_segment_analysis
 - NEW Automation: auto_ml_pipeline (zero-config full pipeline), auto_feature_selection
 - NEW Visualization: generate_all_plots, generate_data_quality_plots, generate_eda_plots, generate_model_performance_plots, generate_feature_importance_plot
+- NEW Interactive Plotly Visualizations: generate_interactive_scatter, generate_interactive_histogram, generate_interactive_correlation_heatmap, generate_interactive_box_plots, generate_interactive_time_series, generate_plotly_dashboard (interactive web-based plots with zoom/pan/hover)
+- NEW EDA Report Generation: generate_sweetviz_report (beautiful fast reports), generate_ydata_profiling_report (comprehensive detailed analysis), generate_combined_eda_report (both in one call)
 - NEW Enhanced Feature Engineering: create_ratio_features, create_statistical_features, create_log_features, create_binned_features
 
 **RULES:**
 ✅ EXECUTE each step (use tools) - ONE tool call per response
 ✅ Use OUTPUT of each tool as INPUT to next
-✅ If tool fails, continue pipeline
-✅ If "no numeric features" → use force_numeric_conversion
 ✅ Save to ./outputs/data/
-✅ When training fails → fix issue → RETRY
+✅ **CRITICAL ERROR RECOVERY - HIGHEST PRIORITY:**
+   - When you see "💡 HINT: Did you mean 'X'?" → IMMEDIATELY retry with 'X'
+   - When tool returns {"suggestion": "Did you mean: X?"} → Extract X and retry
+   - Example: train_baseline_models fails with hint "Did you mean 'mag'?" 
+     → Your NEXT call MUST be: train_baseline_models(..., target_col="mag")
+   - NO OTHER CALLS until you retry with corrected parameter
+✅ **READ ERROR MESSAGES CAREFULLY** - Extract actual column names from errors
+✅ **When training fails with "Column X not found"**: 
+   - Look for "Available columns:" in error message
+   - Look for suggestion in tool_result["suggestion"]
+   - Use the EXACT suggested column name
+   - Common mapping: 'magnitude' → 'mag', 'latitude' → 'lat'
+   - Retry IMMEDIATELY with correct column name (NO OTHER TOOLS FIRST)
+✅ **When file not found**: Check previous step - if it failed, don't continue with that file
+✅ **ASK USER for target column if unclear** - Don't guess!
+✅ **STOP cascading errors**: If a file creation step fails, don't try to use that file in next steps
+✅ When tool fails → analyze error → fix the specific issue → RETRY THAT SAME TOOL (max 1 retry per step)
 ❌ NO recommendations without action
 ❌ NO stopping after detecting issues
-❌ NO giving up on errors
+❌ NO repeating failed file paths - if file wasn't created, use previous working file
+❌ NO repeating the same error twice - learn from error messages
+❌ NO calling different tools when one fails - RETRY the failed tool with corrections first
+❌ NO training models when user only wants analysis/exploration
+❌ NO assuming column names - read error messages for actual names
 ❌ NO XML-style function syntax like <function=name />
+
+**ERROR RECOVERY PATTERNS - FOLLOW THESE EXACTLY:**
+
+**Pattern 1: Column Not Found**
+❌ Tool fails: train_baseline_models(file_path="data.csv", target_col="magnitude")
+📋 Error: "Column 'magnitude' not found. 💡 HINT: Did you mean 'mag'?"
+✅ Next call MUST be: train_baseline_models(file_path="data.csv", target_col="mag")
+❌ WRONG: Calling analyze_distribution or any other tool first!
+
+**Pattern 2: File Not Found (Previous Step Failed)**
+❌ Tool fails: auto_feature_engineering(...) → creates engineered_features.csv FAILED
+❌ Next tool fails: train_baseline_models(file_path="engineered_features.csv") → File not found!
+✅ Correct action: Use LAST SUCCESSFUL file → train_baseline_models(file_path="encoded.csv")
+
+**Pattern 3: Missing Argument**
+❌ Tool fails: "missing 1 required positional argument: 'target_col'"
+✅ Next call: Include ALL required arguments
+
+**CRITICAL RULES:**
+1. If tool_result contains "suggestion", extract the suggested value and retry IMMEDIATELY
+2. If you see "💡 HINT:", use that exact value in your retry
+3. RETRY THE SAME TOOL with corrections before moving to different tools
+4. Max 1 retry per tool - if it fails twice, move on with last successful file
 
 **CRITICAL: Call ONE function at a time. Wait for its result before calling the next.**
 
-File chain: original → cleaned.csv → no_outliers.csv → numeric.csv → encoded.csv → models
+**USER INTENT DETECTION:**
+- Keywords for ML training: "train", "model", "predict", "classification", "regression", "forecast"
+- Keywords for analysis only: "analyze", "explore", "show", "visualize", "understand", "summary"
+- If ambiguous → Complete data prep, then ASK user about next steps
 
-You are a DOER. Complete the ENTIRE pipeline automatically."""
+File chain: original → cleaned.csv → no_outliers.csv → numeric.csv → encoded.csv → models (if requested)
+
+You are a DOER. Complete workflows based on user intent."""
     
     def _generate_cache_key(self, file_path: str, task_description: str, 
                            target_col: Optional[str] = None) -> str:
@@ -351,6 +436,16 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
         try:
             tool_func = self.tool_functions[tool_name]
             result = tool_func(**arguments)
+            
+            # Check if tool itself returned an error (some tools return dict with 'status': 'error')
+            if isinstance(result, dict) and result.get("status") == "error":
+                return {
+                    "success": False,
+                    "tool": tool_name,
+                    "error": result.get("message", result.get("error", "Tool returned error status")),
+                    "error_type": "ToolError"
+                }
+            
             return {
                 "success": True,
                 "tool": tool_name,
@@ -364,6 +459,51 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
                 "error": str(e),
                 "error_type": type(e).__name__
             }
+    
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """
+        Convert objects to JSON-serializable format.
+        Handles matplotlib Figures, numpy arrays, and other non-serializable types.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+        
+        try:
+            from matplotlib.figure import Figure
+        except ImportError:
+            Figure = None
+        
+        # Handle dictionaries recursively
+        if isinstance(obj, dict):
+            return {k: self._make_json_serializable(v) for k, v in obj.items()}
+        
+        # Handle lists recursively
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_json_serializable(item) for item in obj]
+        
+        # Handle matplotlib Figure objects
+        elif Figure and isinstance(obj, Figure):
+            return f"<Matplotlib Figure: {id(obj)}>"
+        
+        # Handle numpy arrays
+        elif np and isinstance(obj, np.ndarray):
+            return f"<NumPy array: shape={obj.shape}>"
+        
+        # Handle numpy scalar types
+        elif hasattr(obj, 'item') and callable(obj.item):
+            try:
+                return obj.item()
+            except:
+                return str(obj)
+        
+        # Handle other non-serializable objects
+        elif hasattr(obj, '__dict__') and not isinstance(obj, (str, int, float, bool, type(None))):
+            return f"<{obj.__class__.__name__} object>"
+        
+        # Already serializable
+        return obj
     
     def _summarize_tool_result(self, tool_result: Dict[str, Any]) -> str:
         """
@@ -485,8 +625,16 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
                 if "enum" in prop_value:
                     compressed_prop["enum"] = list(prop_value["enum"])  # Create new list
                 
-                # Keep array items type
-                if prop_value.get("type") == "array" and "items" in prop_value:
+                # Keep array items type - handle both "array" and ["string", "array"]
+                prop_type = prop_value.get("type")
+                is_array_type = False
+                
+                if isinstance(prop_type, list):
+                    is_array_type = "array" in prop_type
+                elif prop_type == "array":
+                    is_array_type = True
+                
+                if is_array_type and "items" in prop_value:
                     compressed_prop["items"] = {"type": prop_value["items"].get("type", "string")}
                 
                 compressed_params["properties"][prop_name] = compressed_prop
@@ -526,6 +674,17 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
                 "array": "ARRAY",
                 "object": "OBJECT"
             }
+            
+            # Handle list of types (e.g., ["string", "array"])
+            if isinstance(json_type, list):
+                # Use the first type in the list, or ARRAY if array is in the list
+                if "array" in json_type:
+                    return "ARRAY"
+                elif len(json_type) > 0:
+                    return type_map.get(json_type[0], "STRING")
+                else:
+                    return "STRING"
+            
             return type_map.get(json_type, "STRING")
         
         def convert_properties(properties: Dict) -> Dict:
@@ -546,11 +705,31 @@ You are a DOER. Complete the ENTIRE pipeline automatically."""
                     else:
                         new_def["type"] = "STRING"
                 elif "type" in prop_def:
-                    new_def["type"] = convert_type(prop_def["type"])
+                    prop_type = prop_def["type"]
                     
-                    # Handle arrays
-                    if prop_def["type"] == "array" and "items" in prop_def:
-                        new_def["items"] = {"type": convert_type(prop_def["items"].get("type", "string"))}
+                    # Handle list of types (e.g., ["string", "array"])
+                    if isinstance(prop_type, list):
+                        converted_type = convert_type(prop_type)
+                        new_def["type"] = converted_type
+                        
+                        # If it's an array type, we MUST provide items for Gemini
+                        if converted_type == "ARRAY":
+                            if "items" in prop_def:
+                                items_type = prop_def["items"].get("type", "string")
+                                new_def["items"] = {"type": convert_type(items_type)}
+                            else:
+                                # Default to STRING items if not specified
+                                new_def["items"] = {"type": "STRING"}
+                    else:
+                        new_def["type"] = convert_type(prop_type)
+                        
+                        # Handle arrays
+                        if prop_type == "array" and "items" in prop_def:
+                            items_type = prop_def["items"].get("type", "string")
+                            new_def["items"] = {"type": convert_type(items_type)}
+                        elif prop_type == "array":
+                            # Array without items specification - default to STRING
+                            new_def["items"] = {"type": "STRING"}
                     
                     # Keep enum
                     if "enum" in prop_def:
@@ -789,6 +968,42 @@ Execute the complete workflow: profile → clean → convert types → encode �
                     # Execute tool
                     tool_result = self._execute_tool(tool_name, tool_args)
                     
+                    # Check for errors and display them prominently
+                    if not tool_result.get("success", True):
+                        error_msg = tool_result.get("error", "Unknown error")
+                        error_type = tool_result.get("error_type", "Error")
+                        print(f"   ❌ FAILED: {tool_name}")
+                        print(f"   ⚠️  Error Type: {error_type}")
+                        print(f"   ⚠️  Error Message: {error_msg}")
+                        
+                        # Extract helpful info from common errors and add to result
+                        if "Column" in error_msg and "not found" in error_msg and "Available columns:" in error_msg:
+                            # Extract the column that was searched for and available columns
+                            import re
+                            searched = re.search(r"Column '([^']+)' not found", error_msg)
+                            available = re.search(r"Available columns: (.+?)(?:\n|$)", error_msg)
+                            if searched and available:
+                                searched_col = searched.group(1)
+                                available_cols = [c.strip() for c in available.group(1).split(',')]
+                                
+                                # Find similar column names (case-insensitive partial match)
+                                suggestions = []
+                                searched_lower = searched_col.lower()
+                                for col in available_cols[:20]:  # Check first 20
+                                    if searched_lower in col.lower() or col.lower() in searched_lower:
+                                        suggestions.append(col)
+                                
+                                if suggestions:
+                                    tool_result["suggestion"] = f"Did you mean: {suggestions[0]}? (Similar columns: {', '.join(suggestions[:3])})"
+                                    print(f"   💡 HINT: Did you mean '{suggestions[0]}'?")
+                        
+                        # For critical tools, show detailed error to user
+                        if tool_name in ["train_baseline_models", "auto_ml_pipeline"]:
+                            print(f"\n🔴 CRITICAL ERROR in {tool_name}:")
+                            print(f"   {error_msg}\n")
+                    else:
+                        print(f"   ✓ Completed: {tool_name}")
+                    
                     # Track in workflow
                     workflow_history.append({
                         "iteration": iteration,
@@ -797,7 +1012,62 @@ Execute the complete workflow: profile → clean → convert types → encode �
                         "result": tool_result
                     })
                     
-                    print(f"   ✓ Completed: {tool_name}")
+                    # ⚡ CRITICAL FIX: Add tool result back to messages so LLM sees it in next iteration!
+                    if self.provider == "groq":
+                        # For Groq, add tool message with the result
+                        # Make error messages MORE PROMINENT if tool failed
+                        # Clean tool_result to make it JSON-serializable
+                        clean_tool_result = self._make_json_serializable(tool_result)
+                        tool_response_content = json.dumps(clean_tool_result)
+                        
+                        # If tool failed, prepend ERROR indicator to make it obvious
+                        if not tool_result.get("success", True):
+                            error_msg = tool_result.get("error", "Unknown error")
+                            suggestion = tool_result.get("suggestion", "")
+                            
+                            # Create VERY EXPLICIT error message
+                            tool_response_content = json.dumps({
+                                "❌ TOOL_FAILED": True,
+                                "tool_name": tool_name,
+                                "error": error_msg,
+                                "suggestion": suggestion,
+                                "⚠️ ACTION_REQUIRED": f"RETRY {tool_name} with corrected parameters. Do NOT call other tools first!",
+                                "💡 HINT": suggestion if suggestion else "Check error message for details"
+                            })
+                        
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": tool_response_content
+                        })
+                    
+                    elif self.provider == "gemini":
+                        # For Gemini, add to messages for history tracking
+                        # Gemini uses function responses differently but we still track
+                        # Clean tool_result to make it JSON-serializable
+                        clean_tool_result = self._make_json_serializable(tool_result)
+                        tool_response_content = json.dumps(clean_tool_result)
+                        
+                        # If tool failed, make error VERY explicit
+                        if not tool_result.get("success", True):
+                            error_msg = tool_result.get("error", "Unknown error")
+                            suggestion = tool_result.get("suggestion", "")
+                            
+                            tool_response_content = json.dumps({
+                                "❌ TOOL_FAILED": True,
+                                "tool_name": tool_name,
+                                "error": error_msg,
+                                "suggestion": suggestion,
+                                "⚠️ ACTION_REQUIRED": f"RETRY {tool_name} with corrected parameters",
+                                "💡 HINT": suggestion if suggestion else "Check error message"
+                            })
+                        
+                        messages.append({
+                            "role": "tool",
+                            "name": tool_name,
+                            "content": tool_response_content
+                        })
                     
                     # Debug: Check if training completed
                     if tool_name == "train_baseline_models":
@@ -810,78 +1080,9 @@ Execute the complete workflow: profile → clean → convert types → encode �
                         if "best_model" in tool_result:
                             print(f"[DEBUG]   best_model value: {tool_result['best_model']}")
                     
-                    # Check if training is complete - if so, finish successfully BEFORE adding to messages
-                    # Extract the actual result (might be nested under 'result' key)
-                    actual_result = tool_result.get("result", tool_result) if isinstance(tool_result, dict) else tool_result
-                    if tool_name == "train_baseline_models" and isinstance(actual_result, dict) and "best_model" in actual_result:
-                        print(f"🎯 AUTO-FINISH TRIGGERED! Training complete, returning comprehensive report...")
-                        # Generate comprehensive summary
-                        # Extract filename without backslash in f-string
-                        filename = file_path.split('/')[-1] if '/' in file_path else file_path.split('\\')[-1]
-                        summary = f"""✅ **Machine Learning Pipeline Complete!**
-
-**Dataset:** `{filename}`
-**Target:** `{target_col or 'Auto-detected'}`
-
----
-
-### 📊 Data Processing Pipeline
-
-**Step 1: Data Profiling**
-- Analyzed {actual_result.get('n_samples', 'N/A')} rows with {actual_result.get('n_features', 'N/A')} features
-- Identified data types and missing values
-
-**Step 2: Data Quality**
-- Detected and documented quality issues
-- Checked for missing values, duplicates, outliers
-
-**Step 3: Data Cleaning**
-- Cleaned missing values using auto-detection
-- Handled outliers with clipping method
-
-**Step 4: Feature Engineering**
-- Converted string columns to numeric (force conversion)
-- Encoded categorical variables
-- Prepared features for modeling
-
-**Step 5: Model Training** 🎯
-- Trained **4 baseline models**: Ridge, Lasso, Random Forest, XGBoost
-- Task type: **{actual_result.get('task_type', 'regression').title()}**
-- Train/Test split: 80/20
-
----
-
-### 🏆 Best Model Results
-
-**Model:** {actual_result.get('best_model', {}).get('name', 'N/A').upper().replace('_', ' ')}
-**Performance Score (R²):** {actual_result.get('best_model', {}).get('score', 'N/A'):.4f}
-
-**All Models Trained:**
-"""
-                        if "models" in actual_result:
-                            for model_name in actual_result["models"].keys():
-                                summary += f"\n- ✓ {model_name.replace('_', ' ').title()}"
-                        
-                        summary += f"""
-
-**Model saved at:** `./outputs/models/`
-**Processed data:** `./outputs/data/encoded.csv`
-
----
-
-**Total execution time:** {round(time.time() - start_time, 2)}s
-**API calls:** {self.api_calls_made}
-**Pipeline steps:** {len(workflow_history)}
-"""
-                        
-                        return {
-                            "status": "success",
-                            "summary": summary,
-                            "workflow_history": workflow_history,
-                            "iterations": iteration,
-                            "api_calls": self.api_calls_made,
-                            "execution_time": round(time.time() - start_time, 2)
-                        }
+                    # AUTO-FINISH DISABLED: Let agent complete full workflow including EDA reports
+                    # Previously auto-finish would exit immediately after training, preventing
+                    # report generation. Now the agent continues to generate visualizations and reports.
             
             except Exception as e:
                 import traceback

@@ -136,7 +136,7 @@ def create_time_features(file_path: str, date_col: str,
     }
 
 
-def encode_categorical(file_path: str, method: str, columns: List[str],
+def encode_categorical(file_path: str, method: str = "auto", columns: Optional[List[str]] = None,
                       target_col: Optional[str] = None, 
                       output_path: str = None) -> Dict[str, Any]:
     """
@@ -144,8 +144,8 @@ def encode_categorical(file_path: str, method: str, columns: List[str],
     
     Args:
         file_path: Path to CSV or Parquet file
-        method: Encoding method ('one_hot', 'target', 'frequency')
-        columns: List of columns to encode, or ['all'] for all categorical
+        method: Encoding method ('one_hot', 'target', 'frequency', 'auto')
+        columns: List of columns to encode, or ['all'] for all categorical. If None, defaults to all categorical columns
         target_col: Required for target encoding - name of target column
         output_path: Path to save dataset with encoded features
         
@@ -163,7 +163,8 @@ def encode_categorical(file_path: str, method: str, columns: List[str],
     # Determine which columns to process
     categorical_cols = get_categorical_columns(df)
     
-    if columns == ["all"]:
+    # Default to all categorical columns if not specified
+    if columns is None or columns == ["all"]:
         target_cols = categorical_cols
     else:
         # Validate columns exist
@@ -171,6 +172,11 @@ def encode_categorical(file_path: str, method: str, columns: List[str],
             if col not in df.columns:
                 raise ValueError(f"Column '{col}' not found")
         target_cols = columns
+    
+    # Auto-detect method if 'auto'
+    if method == "auto":
+        # Use frequency encoding for high-cardinality, one-hot for low
+        method = "frequency"  # Default safe choice
     
     # For target encoding, validate target column
     if method == "target":
