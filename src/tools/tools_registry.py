@@ -765,9 +765,11 @@ TOOLS = [
                 "properties": {
                     "file_path": {"type": "string", "description": "Path to dataset"},
                     "target_col": {"type": "string", "description": "Target column name"},
-                    "model_type": {"type": "string", "description": "Model type (random_forest, xgboost, etc.)"},
-                    "n_folds": {"type": "integer", "description": "Number of CV folds (default: 5)"},
-                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "ML task type"}
+                    "model_type": {"type": "string", "description": "Model type (random_forest, xgboost, logistic, ridge)"},
+                    "n_splits": {"type": "integer", "description": "Number of CV folds/splits (default: 5)"},
+                    "task_type": {"type": "string", "enum": ["classification", "regression", "auto"], "description": "ML task type"},
+                    "cv_strategy": {"type": "string", "enum": ["kfold", "stratified", "timeseries"], "description": "Cross-validation strategy (default: kfold)"},
+                    "save_oof": {"type": "boolean", "description": "Whether to save out-of-fold predictions (default: false)"}
                 },
                 "required": ["file_path", "target_col", "model_type"]
             }
@@ -1476,6 +1478,59 @@ TOOLS = [
                     "output_dir": {"type": "string", "description": "Directory to save both reports (default: ./outputs/reports)"},
                     "target_column": {"type": "string", "description": "Optional target variable for Sweetviz analysis"},
                     "minimal": {"type": "boolean", "description": "If true, uses minimal mode for ydata-profiling (default: false)"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    # ========================================
+    # CODE INTERPRETER - THE GAME CHANGER 🚀
+    # ========================================
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_python_code",
+            "description": "⭐ CRITICAL TOOL - Execute custom Python code for ANY data science task not covered by existing tools. This is what makes you a TRUE AI AGENT, not just a function-calling bot. Use this when user requests: 1) Custom visualizations (specific Plotly plots, interactive dashboards, unique chart types) 2) Domain-specific calculations 3) Custom data transformations 4) Specific export formats 5) Interactive widgets/filters. Code has access to pandas, polars, numpy, matplotlib, seaborn, plotly. ALWAYS save outputs to files and return file paths.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute. Auto-imported: pandas as pd, polars as pl, numpy as np, matplotlib.pyplot as plt, seaborn as sns, plotly.express as px, plotly.graph_objects as go. Code should save outputs to files in working_directory. Example: fig.write_html('./outputs/code/plot.html')"
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Directory to run code in (default: ./outputs/code). Code can read from ./temp/ and write to this directory."
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum execution time in seconds (default: 60)"
+                    }
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_code_from_file",
+            "description": "Execute Python code from an existing .py file. Useful when code is too long to pass as string, or when running pre-written scripts. Same capabilities as execute_python_code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to .py file to execute"
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Directory to run code in (default: ./outputs/code)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum execution time in seconds (default: 60)"
+                    }
                 },
                 "required": ["file_path"]
             }

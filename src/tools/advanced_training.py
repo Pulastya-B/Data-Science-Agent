@@ -4,6 +4,7 @@ Tools for hyperparameter tuning, ensemble methods, and cross-validation.
 """
 
 import polars as pl
+import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
@@ -81,8 +82,54 @@ def hyperparameter_tuning(
     validate_dataframe(df)
     validate_column_exists(df, target_col)
     
-    # Prepare data
-    X, y = split_features_target(df, target_col)
+    # ⚠️ SKIP DATETIME CONVERSION: Already handled by create_time_features() in workflow step 7
+    # The encoded.csv file should already have time features extracted
+    # If datetime columns still exist, they will be handled as regular features
+    
+    # ⚠️ CRITICAL FIX: Convert Polars to Pandas if needed (for XGBoost compatibility)
+    if hasattr(df, 'to_pandas'):
+        print(f"   🔄 Converting Polars DataFrame to Pandas for XGBoost compatibility...")
+        df = df.to_pandas()
+    
+    # ⚠️ CRITICAL: Drop any remaining datetime columns that weren't converted to features
+    # XGBoost cannot handle Timestamp objects in NumPy arrays
+    if isinstance(df, pd.DataFrame):
+        datetime_cols = df.select_dtypes(include=['datetime64', 'datetime64[ns]', 'datetime64[ns, UTC]']).columns.tolist()
+        if datetime_cols:
+            print(f"   ⚠️ Dropping {len(datetime_cols)} datetime columns that cannot be used directly: {datetime_cols}")
+            print(f"   💡 Time features should have been extracted in workflow step 7 (create_time_features)")
+            df = df.drop(columns=datetime_cols)
+        
+        # ⚠️ CRITICAL: Drop any remaining string/object columns (not encoded properly)
+        # XGBoost cannot handle string values like 'mb', 'ml', etc.
+        object_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+        # Don't drop the target column if it's object type
+        object_cols = [col for col in object_cols if col != target_col]
+        if object_cols:
+            print(f"   ⚠️ Dropping {len(object_cols)} string columns that weren't encoded: {object_cols}")
+            print(f"   💡 Categorical encoding should have been done in workflow step 8 (encode_categorical)")
+            print(f"   💡 These columns likely weren't in the encoded file or encoding failed")
+            df = df.drop(columns=object_cols)
+    
+    # Prepare data - handle both Polars and Pandas
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found in dataframe. Available columns: {list(df.columns)}")
+    
+    # Split features and target (works for both Polars and Pandas)
+    if hasattr(df, 'drop'):  # Both have drop method
+        X = df.drop(columns=[target_col]) if isinstance(df, pd.DataFrame) else df.drop(target_col)
+        y = df[target_col]
+    else:
+        X, y = split_features_target(df, target_col)
+    
+    # Convert to numpy for sklearn compatibility
+    if hasattr(X, 'to_numpy'):
+        X = X.to_numpy()
+        y = y.to_numpy()
+    elif hasattr(X, 'values'):
+        X = X.values
+        y = y.values
+    
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y if task_type == "classification" else None
     )
@@ -289,8 +336,49 @@ def train_ensemble_models(
     validate_dataframe(df)
     validate_column_exists(df, target_col)
     
-    # Prepare data
-    X, y = split_features_target(df, target_col)
+    # ⚠️ SKIP DATETIME CONVERSION: Already handled by create_time_features() in workflow step 7
+    # The encoded.csv file should already have time features extracted
+    
+    # ⚠️ CRITICAL FIX: Convert Polars to Pandas if needed (for XGBoost compatibility)
+    if hasattr(df, 'to_pandas'):
+        print(f"   🔄 Converting Polars DataFrame to Pandas for XGBoost compatibility...")
+        df = df.to_pandas()
+    
+    # ⚠️ CRITICAL: Drop remaining datetime columns BEFORE NumPy conversion
+    # XGBoost cannot handle Timestamp objects (causes TypeError: float() argument must be a string or a real number, not 'Timestamp')
+    if isinstance(df, pd.DataFrame):
+        datetime_cols = df.select_dtypes(include=['datetime64', 'datetime64[ns]', 'datetime64[ns, UTC]']).columns.tolist()
+        if datetime_cols:
+            print(f"   ⚠️ Dropping {len(datetime_cols)} datetime columns: {datetime_cols}")
+            print(f"   💡 Time features should have been extracted in workflow step 7 (create_time_features)")
+            df = df.drop(columns=datetime_cols)
+        
+        # ⚠️ CRITICAL: Drop any remaining string/object columns (not encoded properly)
+        object_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+        object_cols = [col for col in object_cols if col != target_col]
+        if object_cols:
+            print(f"   ⚠️ Dropping {len(object_cols)} string columns that weren't encoded: {object_cols}")
+            print(f"   💡 Categorical encoding should have been done in workflow step 8")
+            df = df.drop(columns=object_cols)
+    
+    # Prepare data - handle both Polars and Pandas
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found in dataframe. Available columns: {list(df.columns)}")
+    
+    # Split features and target (works for both Polars and Pandas)
+    if hasattr(df, 'drop'):
+        X = df.drop(columns=[target_col]) if isinstance(df, pd.DataFrame) else df.drop(target_col)
+        y = df[target_col]
+    else:
+        X, y = split_features_target(df, target_col)
+    
+    # Convert to numpy for sklearn compatibility
+    if hasattr(X, 'to_numpy'):
+        X = X.to_numpy()
+        y = y.to_numpy()
+    elif hasattr(X, 'values'):
+        X = X.values
+        y = y.values
     
     # Detect task type
     if task_type == "auto":
@@ -496,10 +584,51 @@ def perform_cross_validation(
     validate_dataframe(df)
     validate_column_exists(df, target_col)
     
-    # Prepare data
-    X, y = split_features_target(df, target_col)
+    # ⚠️ SKIP DATETIME CONVERSION: Already handled by create_time_features() in workflow step 7
+    # The encoded.csv file should already have time features extracted
     
-    # Detect task type
+    # ⚠️ CRITICAL FIX: Convert Polars to Pandas if needed (for XGBoost compatibility)
+    if hasattr(df, 'to_pandas'):
+        print(f"   🔄 Converting Polars DataFrame to Pandas for XGBoost compatibility...")
+        df = df.to_pandas()
+    
+    # ⚠️ CRITICAL: Drop remaining datetime columns BEFORE NumPy conversion
+    # XGBoost cannot handle Timestamp objects (causes TypeError: float() argument must be a string or a real number, not 'Timestamp')
+    if isinstance(df, pd.DataFrame):
+        datetime_cols = df.select_dtypes(include=['datetime64', 'datetime64[ns]', 'datetime64[ns, UTC]']).columns.tolist()
+        if datetime_cols:
+            print(f"   ⚠️ Dropping {len(datetime_cols)} datetime columns: {datetime_cols}")
+            print(f"   💡 Time features should have been extracted in workflow step 7 (create_time_features)")
+            df = df.drop(columns=datetime_cols)
+        
+        # ⚠️ CRITICAL: Drop any remaining string/object columns (not encoded properly)
+        object_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+        object_cols = [col for col in object_cols if col != target_col]
+        if object_cols:
+            print(f"   ⚠️ Dropping {len(object_cols)} string columns that weren't encoded: {object_cols}")
+            print(f"   💡 Categorical encoding should have been done in workflow step 8")
+            df = df.drop(columns=object_cols)
+    
+    # Prepare data - handle both Polars and Pandas
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found in dataframe. Available columns: {list(df.columns)}")
+    
+    # Split features and target (works for both Polars and Pandas)
+    if hasattr(df, 'drop'):
+        X = df.drop(columns=[target_col]) if isinstance(df, pd.DataFrame) else df.drop(target_col)
+        y = df[target_col]
+    else:
+        X, y = split_features_target(df, target_col)
+    
+    # Convert to numpy for sklearn compatibility
+    if hasattr(X, 'to_numpy'):
+        X = X.to_numpy()
+        y = y.to_numpy()
+    elif hasattr(X, 'values'):
+        X = X.values
+        y = y.values
+    
+    # Detect task type    # Detect task type
     if task_type == "auto":
         unique_values = len(np.unique(y))
         task_type = "classification" if unique_values < 20 else "regression"
