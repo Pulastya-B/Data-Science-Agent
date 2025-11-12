@@ -73,6 +73,10 @@ def hyperparameter_tuning(
     Returns:
         Dictionary with tuning results, best parameters, and performance
     """
+    # ⚠️ CRITICAL FIX: Convert integer params (Gemini/LLMs pass floats)
+    n_trials = int(n_trials)
+    cv_folds = int(cv_folds)
+    random_state = int(random_state)
     # Validation
     validate_file_exists(file_path)
     validate_file_format(file_path)
@@ -575,6 +579,10 @@ def perform_cross_validation(
     Returns:
         Dictionary with CV scores, statistics, and OOF predictions
     """
+    # ⚠️ CRITICAL FIX: Convert n_splits and random_state to int (Gemini/LLMs pass floats)
+    n_splits = int(n_splits)
+    random_state = int(random_state)
+    
     # Validation
     validate_file_exists(file_path)
     validate_file_format(file_path)
@@ -652,11 +660,16 @@ def perform_cross_validation(
         raise ValueError(f"Unsupported model_type: {model_type}")
     
     # Create CV splitter
-    if cv_strategy == "stratified" and task_type == "classification":
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-    elif cv_strategy == "timeseries":
+    # ⚠️ CRITICAL FIX: Auto-use StratifiedKFold for classification to avoid single-class folds
+    if cv_strategy == "timeseries":
         cv = TimeSeriesSplit(n_splits=n_splits)
+    elif task_type == "classification":
+        # Always use stratified for classification (unless timeseries)
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        if cv_strategy != "stratified":
+            print(f"   💡 Auto-switching to StratifiedKFold for classification (prevents single-class folds)")
     else:
+        # Regression: use regular KFold
         cv = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     
     print(f"🔄 Performing {n_splits}-fold cross-validation ({cv_strategy})...")

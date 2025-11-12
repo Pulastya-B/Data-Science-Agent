@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 
 from cache.cache_manager import CacheManager
 from tools.tools_registry import TOOLS, get_all_tool_names, get_tools_by_category
+from session_memory import SessionMemory
+from session_store import SessionStore
 from tools import (
     # Basic Tools (13) - UPDATED: Added get_smart_summary + 3 wrangling tools
     profile_dataset,
@@ -130,7 +132,9 @@ class DataScienceCopilot:
                  google_api_key: Optional[str] = None,
                  cache_db_path: Optional[str] = None,
                  reasoning_effort: str = "medium",
-                 provider: Optional[str] = None):
+                 provider: Optional[str] = None,
+                 session_id: Optional[str] = None,
+                 use_session_memory: bool = True):
         """
         Initialize the Data Science Copilot.
         
@@ -140,6 +144,8 @@ class DataScienceCopilot:
             cache_db_path: Path to cache database
             reasoning_effort: Reasoning effort for Groq ('low', 'medium', 'high')
             provider: LLM provider - 'groq' or 'gemini' (or set LLM_PROVIDER env var)
+            session_id: Session ID to resume (None = auto-resume recent or create new)
+            use_session_memory: Enable session-based memory for context across requests
         """
         # Load environment variables
         load_dotenv()
@@ -180,6 +186,41 @@ class DataScienceCopilot:
         # Initialize cache
         cache_path = cache_db_path or os.getenv("CACHE_DB_PATH", "./cache_db/cache.db")
         self.cache = CacheManager(db_path=cache_path)
+        
+        # 🧠 Initialize session memory
+        self.use_session_memory = use_session_memory
+        if use_session_memory:
+            self.session_store = SessionStore()
+            
+            # Try to load existing session or create new one
+            if session_id:
+                # Explicit session ID provided - load it
+                self.session = self.session_store.load(session_id)
+                if not self.session:
+                    print(f"⚠️  Session {session_id} not found, creating new session")
+                    self.session = SessionMemory(session_id=session_id)
+                else:
+                    print(f"✅ Loaded session: {session_id}")
+            else:
+                # Try to continue recent session (within 24 hours)
+                self.session = self.session_store.get_recent_session(max_age_hours=24)
+                if self.session:
+                    print(f"✅ Resuming recent session: {self.session.session_id}")
+                else:
+                    # No recent session - create new one
+                    self.session = SessionMemory()
+                    print(f"✅ Created new session: {self.session.session_id}")
+            
+            # Show context if available
+            if self.session.last_dataset or self.session.last_model:
+                print(f"📝 Session Context:")
+                if self.session.last_dataset:
+                    print(f"   - Last dataset: {self.session.last_dataset}")
+                if self.session.last_model:
+                    print(f"   - Last model: {self.session.last_model} (score: {self.session.best_score:.4f})" if self.session.best_score else f"   - Last model: {self.session.last_model}")
+        else:
+            self.session = None
+            print("⚠️  Session memory disabled")
         
         # Tools registry
         self.tools_registry = TOOLS
@@ -359,6 +400,63 @@ class DataScienceCopilot:
   3. STOP - Return success
 - **Example**: "Generate interactive plots for Magnitude and latitude"
   → generate_interactive_scatter(x_col="mag", y_col="latitude") → DONE ✓
+
+**📊 COLUMN SELECTION FOR VAGUE REQUESTS:**
+When user doesn't specify columns (e.g., "plot a scatter" without mentioning X/Y):
+
+1. **Analyze the dataset structure and domain**:
+   - Inspect column names, types, and value ranges
+   - Identify patterns: spatial coordinates (lat/lon, x/y), temporal data (dates, timestamps), 
+     categorical hierarchies, numerical measurements, identifiers
+   - Infer domain from filename/columns (geographic, financial, health, retail, etc.)
+   
+2. **Apply intelligent selection strategies**:
+   
+   **For Scatter Plots** - Choose variables with meaningful relationships:
+   - Geographic data: Pair coordinate columns (latitude+longitude, x+y coordinates)
+   - Price/size relationships: Pair cost with quantity/area/volume metrics
+   - Performance metrics: Pair effort/input with outcome/output variables
+   - Temporal relationships: Pair time with trend variables
+   - Categorical vs numeric: Use most important numeric split by key category
+   
+   **For Histograms** - Select the primary measure of interest:
+   - Target variable (if identified): The variable being predicted/analyzed
+   - Main metric: Revenue, score, magnitude, count, amount (key business/scientific measure)
+   - Distribution of interest: Variable with expected patterns (age, income, frequency)
+   - First numeric column with meaningful range (avoid IDs, binary flags)
+   
+   **For Box Plots** - Show distribution comparisons:
+   - Numeric variable grouped by categorical (e.g., price by category, score by region)
+   - Multiple related numeric variables side-by-side
+   
+   **For Time Series** - Identify temporal patterns:
+   - Date/datetime column + primary metric to track over time
+   - Multiple metrics over time if related (sales, costs, profit)
+   
+   **For Heatmaps** - No column choice needed (shows all numeric correlations)
+   
+3. **Selection principles** (no dataset-specific bias):
+   - Avoid ID columns, constants, or binary flags for visualizations
+   - Prefer columns with high variance and meaningful ranges
+   - Choose natural pairs (coordinates, input-output, cause-effect)
+   - Select variables that answer implicit questions about the data
+   - When uncertain, pick columns that reveal the most information
+   
+4. **ALWAYS EXPLAIN YOUR REASONING** in the final summary:
+   - State WHAT columns you chose
+   - Explain WHY those columns (their relationship/significance)
+   - Describe WHAT INSIGHTS the visualization reveals
+   
+   ✅ Good explanation:
+   "I created a scatter plot of [Column A] vs [Column B] because they represent [relationship type].
+   This visualization reveals [pattern/insight]. For the histogram, I chose [Column C] as it's 
+   the [primary metric/target variable], showing [distribution pattern]."
+   
+   ❌ Bad explanation:
+   "Scatter plot created" (no reasoning about column selection)
+
+**TRANSPARENCY RULE**: Justify every column choice with domain-agnostic reasoning based on data 
+structure, variable relationships, and expected insights - not hardcoded domain assumptions.
 
 **WORKFLOW FOR FULL ML ANALYSIS (Type C above):**
 - User wants: model training, prediction, classification
@@ -707,26 +805,41 @@ You are a DOER. Complete workflows based on user intent."""
             
             # Check if tool itself returned an error (some tools return dict with 'status': 'error')
             if isinstance(result, dict) and result.get("status") == "error":
-                return {
+                tool_result = {
                     "success": False,
                     "tool": tool_name,
+                    "arguments": arguments,
                     "error": result.get("message", result.get("error", "Tool returned error status")),
                     "error_type": "ToolError"
                 }
+            else:
+                tool_result = {
+                    "success": True,
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": result
+                }
             
-            return {
-                "success": True,
-                "tool": tool_name,
-                "result": result
-            }
+            # 🧠 Update session memory with tool execution
+            if self.session:
+                self.session.add_workflow_step(tool_name, tool_result)
+            
+            return tool_result
         
         except Exception as e:
-            return {
+            tool_result = {
                 "success": False,
                 "tool": tool_name,
+                "arguments": arguments,
                 "error": str(e),
                 "error_type": type(e).__name__
             }
+            
+            # Still track failed tools in session
+            if self.session:
+                self.session.add_workflow_step(tool_name, tool_result)
+            
+            return tool_result
     
     def _make_json_serializable(self, obj: Any) -> Any:
         """
@@ -1065,14 +1178,57 @@ You are a DOER. Complete workflows based on user intent."""
         # Build initial messages
         system_prompt = self._build_system_prompt()
         
+        # 🧠 RESOLVE AMBIGUITY USING SESSION MEMORY
+        original_file_path = file_path
+        original_target_col = target_col
+        
+        if self.session:
+            # Check if request has ambiguous references
+            resolved_params = self.session.resolve_ambiguity(task_description)
+            
+            # Use resolved params if user didn't specify
+            if not file_path or file_path == "":
+                if resolved_params.get("file_path"):
+                    file_path = resolved_params["file_path"]
+                    print(f"📝 Using dataset from session: {file_path}")
+            
+            if not target_col:
+                if resolved_params.get("target_col"):
+                    target_col = resolved_params["target_col"]
+                    print(f"📝 Using target column from session: {target_col}")
+            
+            # Show session context if available
+            if self.session.last_dataset or self.session.last_model:
+                context_summary = self.session.get_context_summary()
+                print(f"\n{context_summary}\n")
+        
         # 🎯 PROACTIVE INTENT DETECTION - Tell LLM which tools to use BEFORE it tries wrong ones
         task_lower = task_description.lower()
         
         # Detect user intent
-        wants_viz = any(kw in task_lower for kw in ["plot", "graph", "visualiz", "dashboard", "chart"])
+        wants_viz = any(kw in task_lower for kw in ["plot", "graph", "visualiz", "dashboard", "chart", "show", "display", "create", "generate"])
         wants_clean = any(kw in task_lower for kw in ["clean", "missing", "impute"])
         wants_features = any(kw in task_lower for kw in ["feature", "engineer", "time-based", "extract features"])
         wants_train = any(kw in task_lower for kw in ["train", "model", "predict", "best model"])
+        
+        # 📊 DETECT SPECIFIC PLOT TYPE - Match user's exact visualization request
+        plot_type_guidance = ""
+        if wants_viz:
+            if "histogram" in task_lower or "distribution" in task_lower or "freq" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Histogram\n✅ Use: generate_interactive_histogram\n❌ Do NOT use: generate_interactive_scatter (that's for scatter plots!)"
+            elif "scatter" in task_lower or "relationship" in task_lower or "correlation" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Scatter Plot\n✅ Use: generate_interactive_scatter\n❌ Do NOT use: generate_interactive_histogram (that's for distributions!)"
+            elif "box plot" in task_lower or "boxplot" in task_lower or "outlier" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Box Plot\n✅ Use: generate_interactive_box_plots"
+            elif "time series" in task_lower or "trend" in task_lower or "over time" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Time Series\n✅ Use: generate_interactive_time_series"
+            elif "heatmap" in task_lower or "correlation" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Heatmap\n✅ Use: generate_interactive_correlation_heatmap"
+            elif "dashboard" in task_lower or "all plot" in task_lower:
+                plot_type_guidance = "\n\n📊 **PLOT TYPE DETECTED**: Dashboard/Multiple Plots\n✅ Use: generate_plotly_dashboard OR generate_all_plots"
+            else:
+                # Generic visualization - let LLM decide based on data
+                plot_type_guidance = "\n\n📊 **PLOT TYPE**: Generic visualization\n✅ Choose appropriate tool based on:\n- Histogram: Single numeric variable distribution\n- Scatter: Relationship between 2 numeric variables\n- Box Plot: Compare distributions across categories\n- Time Series: Data with datetime column"
         
         # Build specific guidance based on intent
         workflow_guidance = ""
@@ -1105,9 +1261,9 @@ You are a DOER. Complete workflows based on user intent."""
         elif wants_viz and not wants_train and not wants_clean:
             # Visualization only
             workflow_guidance = (
-                "\n\n🎯 **WORKFLOW**: Visualization ONLY\n"
+                f"\n\n🎯 **WORKFLOW**: Visualization ONLY{plot_type_guidance}\n"
                 "⚠️ DO NOT run profiling or cleaning tools!\n"
-                "✅ YOUR FIRST CALL: generate_interactive_scatter OR generate_plotly_dashboard\n"
+                "✅ YOUR FIRST CALL: Use the EXACT plot type mentioned above\n"
                 "✅ Then STOP immediately (no training, no cleaning needed!)"
             )
         elif wants_features and not wants_train:
@@ -1250,6 +1406,12 @@ You are a DOER. Complete workflows based on user intent."""
                     # Final response
                     final_summary = final_content or "Analysis completed"
                     
+                    # 🧠 Save conversation to session memory
+                    if self.session:
+                        self.session.add_conversation(task_description, final_summary)
+                        self.session_store.save(self.session)
+                        print(f"\n✅ Session saved: {self.session.session_id}")
+                    
                     result = {
                         "status": "success",
                         "summary": final_summary,
@@ -1303,7 +1465,7 @@ You are a DOER. Complete workflows based on user intent."""
                     task_lower = task_description.lower()
                     
                     # Define intent keywords
-                    visualization_keywords = ["plot", "graph", "visualiz", "dashboard", "chart", "show", "display"]
+                    visualization_keywords = ["plot", "graph", "visualiz", "dashboard", "chart", "show", "display", "create", "generate"]
                     cleaning_keywords = ["clean", "remove missing", "handle missing", "fill missing", "impute"]
                     feature_eng_keywords = ["feature", "engineer", "create features", "add features", "extract features", "time-based"]
                     profiling_keywords = ["profile", "explore", "understand", "summarize", "describe"]
@@ -1864,6 +2026,12 @@ You are a DOER. Complete workflows based on user intent."""
                 print(f"❌ ERROR in analyze loop: {e}")
                 print(f"   Error type: {type(e).__name__}")
                 print(f"   Traceback:\n{error_traceback}")
+                
+                # 🧠 Save session even on error
+                if self.session:
+                    self.session.add_conversation(task_description, f"Error: {str(e)}")
+                    self.session_store.save(self.session)
+                
                 return {
                     "status": "error",
                     "error": str(e),
@@ -1874,6 +2042,11 @@ You are a DOER. Complete workflows based on user intent."""
                 }
         
         # Max iterations reached
+        # 🧠 Save session
+        if self.session:
+            self.session.add_conversation(task_description, "Workflow incomplete - max iterations reached")
+            self.session_store.save(self.session)
+        
         return {
             "status": "incomplete",
             "message": f"Reached maximum iterations ({max_iterations})",
@@ -1888,3 +2061,22 @@ You are a DOER. Complete workflows based on user intent."""
     def clear_cache(self) -> None:
         """Clear all cached results."""
         self.cache.clear_all()
+    
+    def get_session_id(self) -> Optional[str]:
+        """Get current session ID."""
+        return self.session.session_id if self.session else None
+    
+    def clear_session(self) -> None:
+        """Clear current session context (start fresh)."""
+        if self.session:
+            self.session.clear()
+            print("✅ Session context cleared")
+        else:
+            print("⚠️  No active session")
+    
+    def get_session_context(self) -> str:
+        """Get human-readable session context summary."""
+        if self.session:
+            return self.session.get_context_summary()
+        else:
+            return "No active session"
