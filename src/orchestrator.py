@@ -111,6 +111,11 @@ from tools import (
     # Code Interpreter (2) - NEW PHASE 2 - TRUE AI AGENT CAPABILITY
     execute_python_code,
     execute_code_from_file,
+    # Cloud Data Sources (4) - NEW: BigQuery Integration
+    load_bigquery_table,
+    write_bigquery_table,
+    profile_bigquery_table,
+    query_bigquery,
     # Enhanced Feature Engineering (4)
     create_ratio_features,
     create_statistical_features,
@@ -334,6 +339,11 @@ class DataScienceCopilot:
             # Code Interpreter (2) - NEW PHASE 2 - TRUE AI AGENT CAPABILITY
             "execute_python_code": execute_python_code,
             "execute_code_from_file": execute_code_from_file,
+            # Cloud Data Sources (4) - NEW: BigQuery Integration
+            "load_bigquery_table": load_bigquery_table,
+            "write_bigquery_table": write_bigquery_table,
+            "profile_bigquery_table": profile_bigquery_table,
+            "query_bigquery": query_bigquery,
             # Enhanced Feature Engineering (4)
             "create_ratio_features": create_ratio_features,
             "create_statistical_features": create_statistical_features,
@@ -2023,6 +2033,25 @@ You are a DOER. Complete workflows based on user intent."""
             except Exception as e:
                 import traceback
                 error_traceback = traceback.format_exc()
+                error_str = str(e)
+                
+                # Handle rate limit errors with retry
+                if "rate_limit" in error_str.lower() or "429" in error_str or "quota" in error_str.lower() or "413" in error_str:
+                    # Extract retry delay if available
+                    retry_delay = 45  # Default wait time
+                    if "retry in" in error_str.lower():
+                        import re
+                        match = re.search(r'retry in (\d+)', error_str.lower())
+                        if match:
+                            retry_delay = int(match.group(1)) + 5  # Add buffer
+                    
+                    print(f"⏳ Rate limit hit. Waiting {retry_delay}s before retry...")
+                    time.sleep(retry_delay)
+                    
+                    # Retry the same iteration
+                    iteration -= 1  # Decrement so next loop retries
+                    continue
+                
                 print(f"❌ ERROR in analyze loop: {e}")
                 print(f"   Error type: {type(e).__name__}")
                 print(f"   Traceback:\n{error_traceback}")

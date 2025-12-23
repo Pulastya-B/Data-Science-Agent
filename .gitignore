@@ -39,7 +39,9 @@ ENV/
 # Cache & Outputs
 cache_db/*.db
 cache_db/*.db-journal
+cache_db/
 outputs/
+temp/
 *.pkl
 *.joblib
 
@@ -47,6 +49,9 @@ outputs/
 data/*.csv
 data/*.parquet
 !data/.gitkeep
+
+# Cloud Run URL
+.cloud_run_url
 
 # Jupyter
 .ipynb_checkpoints/

@@ -40,12 +40,48 @@ current_profile = None
 last_agent_response = None  # Store last agent response for visualization extraction
 
 
+# Helper functions for Gradio 6.x message format
+def add_message(history, role, content):
+    """Add a message to history in Gradio 6.x format."""
+    if history is None:
+        history = []
+    history.append({"role": role, "content": content})
+    return history
+
+
+def add_user_message(history, content):
+    """Add a user message to history."""
+    return add_message(history, "user", content)
+
+
+def add_assistant_message(history, content):
+    """Add an assistant message to history."""
+    return add_message(history, "assistant", content)
+
+
+def update_last_assistant_message(history, content):
+    """Update the last assistant message in history."""
+    if history and len(history) > 0 and history[-1].get("role") == "assistant":
+        history[-1]["content"] = content
+    return history
+
+
+def get_last_user_content(history):
+    """Get the content of the last user message."""
+    if history:
+        for msg in reversed(history):
+            if msg.get("role") == "user":
+                return msg.get("content", "")
+    return ""
+
+
 def analyze_dataset(file, user_message, history):
     """Process uploaded dataset(s) and user message. Supports single or multiple file uploads."""
     global current_file, current_profile, last_agent_response
     
     # Initialize with empty plot list (will collect PNG file paths)
     plots_paths = []
+    html_reports = []  # Initialize HTML reports list
     
     # Initialize history if None
     if history is None:
@@ -183,12 +219,9 @@ def analyze_dataset(file, user_message, history):
                     response += "- Generate predictions\n"
                     response += "- And much more!\n"
                     
-                    # Add or replace message in history
-                    if history and len(history) > 0 and history[-1][0] is None:
-                        history[-1] = (None, response)
-                    else:
-                        history.append((None, response))
-                    yield history, "", []
+                    # Add assistant message to history
+                    history = add_assistant_message(history, response)
+                    yield history, "", [], []
                     return
                 # If user uploaded file AND sent a message, don't return - continue to process the message
                 elif user_message and user_message.strip():
@@ -204,8 +237,9 @@ def analyze_dataset(file, user_message, history):
                 try:
                     # Show immediate processing message
                     print(f"🤖 AI Agent analyzing: {user_message}")
-                    history.append((user_message, "🤖 **AI Agent is thinking...**\n\n⏳ Analyzing your request and planning the workflow..."))
-                    yield history, "", []
+                    history = add_user_message(history, user_message)
+                    history = add_assistant_message(history, "🤖 **AI Agent is thinking...**\n\n⏳ Analyzing your request and planning the workflow...")
+                    yield history, "", [], []
                     
                     # Use the AI agent to process the request
                     print(f"📂 File path: {current_file}")
@@ -290,61 +324,92 @@ def analyze_dataset(file, user_message, history):
                                 response += f"{i}. {icon} {tool_name}\n"
                             response += "\n"
                             
-                            # Check for plots in workflow results (now supporting PNG from matplotlib)
+                            # Check for plots AND reports in workflow results
+                            html_reports = []  # Separate list for HTML reports
+                            
                             for step in agent_response['workflow_history']:
                                 result = step.get('result', {})
                                 
-                                # Deep search for plots in nested results
-                                def find_plots(obj, plots_list):
+                                # Deep search for plots and reports in nested results
+                                def find_plots_and_reports(obj, plots_list, reports_list):
                                     if isinstance(obj, dict):
-                                        # Check direct plot keys (now looking for PNG files)
-                                        for key in ['plot_path', 'plot_file', 'output_path', 
+                                        # Check direct plot/report keys
+                                        for key in ['plot_path', 'plot_file', 'output_path', 'html_path', 'report_path',
                                                    'plots', 'plot_paths', 'performance_plots', 'feature_importance_plot']:
                                             if key in obj and obj[key]:
                                                 if isinstance(obj[key], list):
-                                                    for plot_path in obj[key]:
-                                                        # Support both PNG (new) and HTML (backward compat)
-                                                        if isinstance(plot_path, str) and (plot_path.endswith('.png') or plot_path.endswith('.html')) and os.path.exists(plot_path):
-                                                            plots_list.append(plot_path)
-                                                elif isinstance(obj[key], str) and (obj[key].endswith('.png') or obj[key].endswith('.html')) and os.path.exists(obj[key]):
-                                                    plots_list.append(obj[key])
+                                                    for path in obj[key]:
+                                                        if isinstance(path, str) and os.path.exists(path):
+                                                            if path.endswith('.html'):
+                                                                # Check if it's a report (in reports folder) or interactive plot
+                                                                if '/reports/' in path or 'report' in Path(path).stem.lower():
+                                                                    reports_list.append(path)
+                                                                else:
+                                                                    reports_list.append(path)  # Interactive plots also go to reports
+                                                            elif path.endswith(('.png', '.jpg', '.jpeg')):
+                                                                plots_list.append(path)
+                                                elif isinstance(obj[key], str) and os.path.exists(obj[key]):
+                                                    if obj[key].endswith('.html'):
+                                                        if '/reports/' in obj[key] or 'report' in Path(obj[key]).stem.lower():
+                                                            reports_list.append(obj[key])
+                                                        else:
+                                                            reports_list.append(obj[key])
+                                                    elif obj[key].endswith(('.png', '.jpg', '.jpeg')):
+                                                        plots_list.append(obj[key])
                                         # Recursively search nested dicts
                                         for value in obj.values():
-                                            find_plots(value, plots_list)
+                                            find_plots_and_reports(value, plots_list, reports_list)
                                 
-                                find_plots(result, plots_paths)
+                                find_plots_and_reports(result, plots_paths, html_reports)
                             
                             # Remove duplicates while preserving order
                             plots_paths = list(dict.fromkeys(plots_paths))
+                            html_reports = list(dict.fromkeys(html_reports))
                             
-                            # Display plot information in response
-                            if plots_paths:
-                                response += f"## 📊 Generated Visualizations ({len(plots_paths)} plots)\n\n"
-                                response += "✅ Plots are displayed in the **Visualization Gallery** below!\n\n"
+                            # Display visualization and report information in response
+                            if plots_paths or html_reports:
+                                response += f"## 📊 Generated Outputs\n\n"
                                 
-                                # List plot files
-                                for i, plot_path in enumerate(plots_paths[:10], 1):
-                                    try:
-                                        plot_name = Path(plot_path).stem.replace('_', ' ').title()
-                                        rel_path = os.path.relpath(plot_path, '.')
-                                        response += f"{i}. 📊 **{plot_name}**\n"
-                                        response += f"   📁 `{rel_path}`\n\n"
-                                    except Exception as e:
-                                        response += f"{i}. ❌ Error: {str(e)}\n"
+                                if plots_paths:
+                                    response += f"### 📈 Visualizations ({len(plots_paths)} plots)\n"
+                                    response += "✅ Plots are displayed in the **Visualization Gallery** below!\n\n"
+                                    
+                                    # List plot files
+                                    for i, plot_path in enumerate(plots_paths[:10], 1):
+                                        try:
+                                            plot_name = Path(plot_path).stem.replace('_', ' ').title()
+                                            rel_path = os.path.relpath(plot_path, '.')
+                                            response += f"{i}. 📊 **{plot_name}**\n"
+                                            response += f"   📁 `{rel_path}`\n\n"
+                                        except Exception as e:
+                                            response += f"{i}. ❌ Error: {str(e)}\n"
+                                
+                                if html_reports:
+                                    response += f"### 📋 Reports & Interactive Plots ({len(html_reports)} files)\n"
+                                    response += "✅ Reports are displayed in the **Reports Viewer** below!\n\n"
+                                    
+                                    # List report files
+                                    for i, report_path in enumerate(html_reports[:10], 1):
+                                        try:
+                                            report_name = Path(report_path).stem.replace('_', ' ').title()
+                                            rel_path = os.path.relpath(report_path, '.')
+                                            file_size = os.path.getsize(report_path) / 1024  # KB
+                                            response += f"{i}. 📄 **{report_name}**\n"
+                                            response += f"   📁 `{rel_path}` ({file_size:.1f} KB)\n\n"
+                                        except Exception as e:
+                                            response += f"{i}. ❌ Error: {str(e)}\n"
                             else:
-                                response += "ℹ️ No visualizations were generated in this workflow.\n"
+                                response += "ℹ️ No visualizations or reports were generated in this workflow.\n"
                     else:
                         response = f"⚠️ **AI Agent Status:** {agent_response.get('status', 'unknown')}\n\n"
                         response += f"{agent_response.get('message', agent_response.get('error', 'Unknown error'))}\n"
                     
-                    # Replace loading message safely
-                    if history and len(history) > 0 and history[-1][0] == user_message:
-                        history[-1] = (user_message, response)
-                    else:
-                        history.append((user_message, response))
+                    # Update the last assistant message with the response
+                    history = update_last_assistant_message(history, response)
                     
-                    # Return plot paths for gallery (gr.Gallery expects list of file paths)
-                    yield history, "", plots_paths if plots_paths else []
+                    # Return plot paths for gallery and html_reports for HTML viewer
+                    # Store html_reports in a format the HTML component can use
+                    yield history, "", plots_paths if plots_paths else [], html_reports if html_reports else []
                     return
                 except Exception as e:
                     import sys
@@ -356,11 +421,8 @@ def analyze_dataset(file, user_message, history):
                     response += "💡 **Fallback Options:**\n"
                     response += "- Use the **Quick Train** feature on the right\n"
                     response += "- Try manual commands: `profile`, `quality`, `columns`\n"
-                    # Replace loading message safely
-                    if history and len(history) > 0 and history[-1][0] == user_message:
-                        history[-1] = (user_message, response)
-                    else:
-                        history.append((user_message, response))
+                    # Update the last assistant message with error
+                    history = update_last_assistant_message(history, response)
                     yield history, "", plots_paths if plots_paths else []
                     return
             else:
@@ -441,41 +503,38 @@ def analyze_dataset(file, user_message, history):
                     response += "• `help` - Show available commands\n\n"
                     response += "**Or use Quick Train** on the right to train models directly!\n"
                 
-                # Replace loading message safely
-                if history and len(history) > 0 and history[-1][0] == user_message:
-                    history[-1] = (user_message, response)
-                else:
-                    history.append((user_message, response))
-                yield history, "", []
+                # Add user message and assistant response
+                history = add_user_message(history, user_message)
+                history = add_assistant_message(history, response)
+                yield history, "", [], []
                 return
         
         # If no file is uploaded yet
         if user_message and user_message.strip() and not current_file:
             response = "⚠️ **Please upload a dataset first!**\n\n"
             response += "Click the 'Upload Dataset' button above and select a CSV or Parquet file."
-            # Replace loading message safely
-            if history and len(history) > 0 and history[-1][0] == user_message:
-                history[-1] = (user_message, response)
-            else:
-                history.append((user_message, response))
-            yield history, "", []
+            # Add user message and assistant response
+            history = add_user_message(history, user_message)
+            history = add_assistant_message(history, response)
+            yield history, "", [], []
             return
             
     except Exception as e:
         error_msg = f"❌ **Error:** {str(e)}\n\n"
         error_msg += "**Traceback:**\n```\n" + traceback.format_exc() + "\n```"
         if user_message:
-            if history and history[-1][0] == user_message:
-                history[-1] = (user_message, error_msg)
-            else:
-                history.append((user_message, error_msg))
+            # Check if we already added the user message
+            last_user = get_last_user_content(history)
+            if last_user != user_message:
+                history = add_user_message(history, user_message)
+            history = add_assistant_message(history, error_msg)
         else:
-            history.append((None, error_msg))
-        yield history, "", []
+            history = add_assistant_message(history, error_msg)
+        yield history, "", [], []
         return
     
     # Default return if nothing matched
-    yield history, "", []
+    yield history, "", [], []
 
 
 def quick_profile(file):
@@ -638,7 +697,103 @@ def clear_conversation():
     global current_file, current_profile
     current_file = None
     current_profile = None
-    return [], None, "", []
+    return [], None, "", [], ""
+
+
+def format_html_reports(html_paths):
+    """Format HTML reports/plots for display in HTML component."""
+    if not html_paths or len(html_paths) == 0:
+        return "<div style='text-align:center; padding:40px; color:#666;'>No reports generated yet. Try: 'Generate a quality report' or 'Create interactive visualizations'</div>"
+    
+    html_output = """
+    <style>
+        .report-container {
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .report-card {
+            margin-bottom: 30px;
+            border: 2px solid #dee2e6;
+            border-radius: 12px;
+            overflow: hidden;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .report-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .report-meta {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        .report-iframe {
+            width: 100%;
+            min-height: 600px;
+            border: none;
+            background: white;
+        }
+        .report-footer {
+            background: #f8f9fa;
+            padding: 10px 20px;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #dee2e6;
+        }
+    </style>
+    <div class="report-container">
+    """
+    
+    html_output += f"<h2 style='color: #667eea; margin-bottom: 20px;'>📋 {len(html_paths)} Report(s) Generated</h2>"
+    
+    for i, html_path in enumerate(html_paths, 1):
+        try:
+            # Get file metadata
+            file_name = Path(html_path).name
+            file_size = os.path.getsize(html_path) / 1024  # KB
+            report_title = Path(html_path).stem.replace('_', ' ').title()
+            
+            # Read the HTML content
+            with open(html_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            
+            # Escape the content for embedding
+            escaped_content = html_content.replace('\\', '\\\\').replace('"', '&quot;').replace("'", "\\'")
+            
+            html_output += f"""
+            <div class="report-card">
+                <div class="report-header">
+                    <span>📊 {i}. {report_title}</span>
+                    <span class="report-meta">{file_size:.1f} KB</span>
+                </div>
+                <iframe class="report-iframe" srcdoc="{escaped_content}"></iframe>
+                <div class="report-footer">
+                    📁 {html_path}
+                </div>
+            </div>
+            """
+        except Exception as e:
+            html_output += f"""
+            <div class="report-card">
+                <div class="report-header" style="background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);">
+                    <span>❌ Error loading: {Path(html_path).name}</span>
+                </div>
+                <div style="padding: 20px;">
+                    <p><strong>Error:</strong> {str(e)}</p>
+                    <p><strong>Path:</strong> {html_path}</p>
+                </div>
+            </div>
+            """
+    
+    html_output += "</div>"
+    
+    return html_output
 
 
 def extract_and_display_plots(agent_response):
@@ -828,35 +983,66 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
         with gr.Column():
             gr.Markdown("## 🎨 Visualization Gallery")
             visualization_gallery = gr.Gallery(
-                label="Generated Plots",
+                label="Generated Plots (PNG/JPG)",
                 show_label=True,
-                elem_id="gallery"
+                elem_id="gallery",
+                columns=2,
+                height=400
             )
     
+    # Reports Viewer Section (Full Width)
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("## 📋 Reports & Interactive Visualizations")
+            gr.Markdown("*HTML reports and interactive Plotly charts will be displayed here*")
+            reports_viewer = gr.HTML(
+                value="<div style='text-align:center; padding:40px; color:#666;'>No reports generated yet. Try: 'Generate a quality report' or 'Create interactive visualizations'</div>",
+                elem_id="reports_viewer"
+            )
+    
+    # Create state to hold HTML report paths
+    html_reports_state = gr.State([])
+    
     # Event handlers with streaming support
-    submit_btn.click(
+    submit_result = submit_btn.click(
         fn=analyze_dataset,
         inputs=[file_upload, user_input, chatbot],
-        outputs=[chatbot, user_input, visualization_gallery],
+        outputs=[chatbot, user_input, visualization_gallery, html_reports_state],
         show_progress="full"  # Show progress bar
     )
-    
-    user_input.submit(
-        fn=analyze_dataset,
-        inputs=[file_upload, user_input, chatbot],
-        outputs=[chatbot, user_input, visualization_gallery],
-        show_progress="full"
+    submit_result.then(
+        fn=format_html_reports,
+        inputs=[html_reports_state],
+        outputs=[reports_viewer]
     )
     
-    file_upload.change(
+    user_input_result = user_input.submit(
+        fn=analyze_dataset,
+        inputs=[file_upload, user_input, chatbot],
+        outputs=[chatbot, user_input, visualization_gallery, html_reports_state],
+        show_progress="full"
+    )
+    user_input_result.then(
+        fn=format_html_reports,
+        inputs=[html_reports_state],
+        outputs=[reports_viewer]
+    )
+    
+    file_result = file_upload.change(
         fn=analyze_dataset,
         inputs=[file_upload, gr.Textbox(value="", visible=False), chatbot],
-        outputs=[chatbot, user_input, visualization_gallery],
+        outputs=[chatbot, user_input, visualization_gallery, html_reports_state],
         show_progress="full"
-    ).then(
+    )
+    file_result.then(
         fn=quick_profile,
         inputs=[file_upload],
         outputs=[dataset_info]
+    )
+    file_result.then(
+        fn=format_html_reports,
+        inputs=[html_reports_state],
+        outputs=[reports_viewer]
     )
     
     train_btn.click(
@@ -868,7 +1054,7 @@ with gr.Blocks(title="AI Agent Data Scientist", theme=gr.themes.Soft(), css=cust
     
     clear_btn.click(
         clear_conversation,
-        outputs=[chatbot, file_upload, user_input, visualization_gallery]
+        outputs=[chatbot, file_upload, user_input, visualization_gallery, reports_viewer]
     )
 
 if __name__ == "__main__":

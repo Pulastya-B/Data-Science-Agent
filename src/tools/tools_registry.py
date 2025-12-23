@@ -1535,6 +1535,137 @@ TOOLS = [
                 "required": ["file_path"]
             }
         }
+    },
+    
+    # ============================================
+    # CLOUD DATA SOURCES (4) - NEW
+    # ============================================
+    
+    {
+        "type": "function",
+        "function": {
+            "name": "load_bigquery_table",
+            "description": "Load data from Google BigQuery table into a Polars DataFrame. Supports sampling via LIMIT and column selection. Returns CSV path for downstream tools. Use profile_bigquery_table first for large tables.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Google Cloud project ID"
+                    },
+                    "dataset": {
+                        "type": "string",
+                        "description": "BigQuery dataset name"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "BigQuery table name"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional row limit for sampling (e.g., 10000 for large tables)"
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of column names to load"
+                    },
+                    "where_clause": {
+                        "type": "string",
+                        "description": "Optional SQL WHERE clause for filtering (without WHERE keyword)"
+                    }
+                },
+                "required": ["project_id", "dataset", "table"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_bigquery_table",
+            "description": "Write predictions or processed data from CSV/Parquet file to BigQuery table. Supports append, overwrite, or fail modes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to CSV or Parquet file to write"
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Google Cloud project ID"
+                    },
+                    "dataset": {
+                        "type": "string",
+                        "description": "BigQuery dataset name"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "BigQuery table name"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["append", "overwrite", "fail"],
+                        "description": "Write mode: append (add rows), overwrite (replace), fail (error if exists)"
+                    }
+                },
+                "required": ["file_path", "project_id", "dataset", "table"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "profile_bigquery_table",
+            "description": "Profile a BigQuery table without loading all data. Returns row count, column types, null counts (sampled), table size, and load recommendations. Use this BEFORE load_bigquery_table for large tables.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Google Cloud project ID"
+                    },
+                    "dataset": {
+                        "type": "string",
+                        "description": "BigQuery dataset name"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "BigQuery table name"
+                    }
+                },
+                "required": ["project_id", "dataset", "table"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_bigquery",
+            "description": "Execute custom BigQuery SQL query and return results as DataFrame. Useful for complex aggregations, joins, or transformations before analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Google Cloud project ID"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to execute"
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional path to save results (default: auto-generated)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional row limit to append to query"
+                    }
+                },
+                "required": ["project_id", "query"]
+            }
+        }
     }
 ]
 
@@ -1564,5 +1695,6 @@ def get_tools_by_category() -> dict:
         "computer_vision": [t["function"]["name"] for t in TOOLS[35:38]],
         "nlp_text_analytics": [t["function"]["name"] for t in TOOLS[38:42]],
         "production_mlops": [t["function"]["name"] for t in TOOLS[42:47]],
-        "time_series": [t["function"]["name"] for t in TOOLS[47:50]]
+        "time_series": [t["function"]["name"] for t in TOOLS[47:50]],
+        "cloud_data_sources": [t["function"]["name"] for t in TOOLS[50:54]]
     }

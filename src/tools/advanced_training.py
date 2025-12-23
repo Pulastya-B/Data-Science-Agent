@@ -16,11 +16,20 @@ import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 import warnings
+import tempfile
 
 warnings.filterwarnings('ignore')
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import artifact store
+try:
+    from storage.helpers import save_model_with_store
+    ARTIFACT_STORE_AVAILABLE = True
+except ImportError:
+    ARTIFACT_STORE_AVAILABLE = False
+    print("⚠️  Artifact store not available, using local paths")
 
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, TimeSeriesSplit, cross_val_score
 from sklearn.linear_model import LogisticRegression, Ridge, Lasso, ElasticNet
@@ -285,8 +294,21 @@ def hyperparameter_tuning(
     
     # Save model if output path provided
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        joblib.dump(final_model, output_path)
+        if ARTIFACT_STORE_AVAILABLE:
+            output_path = save_model_with_store(
+                model_data=final_model,
+                filename=os.path.basename(output_path),
+                metadata={
+                    "model_type": model_type,
+                    "task_type": task_type,
+                    "best_params": best_params,
+                    "cv_score": float(best_score),
+                    "test_metrics": test_metrics
+                }
+            )
+        else:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            joblib.dump(final_model, output_path)
         print(f"💾 Model saved to: {output_path}")
     
     return {
@@ -491,12 +513,28 @@ def train_ensemble_models(
         
         # Save for blending
         if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            joblib.dump({
-                'base_models': dict(base_models),
-                'meta_model': meta_model,
-                'ensemble_type': 'blending'
-            }, output_path)
+            if ARTIFACT_STORE_AVAILABLE:
+                output_path = save_model_with_store(
+                    model_data={
+                        'base_models': dict(base_models),
+                        'meta_model': meta_model,
+                        'ensemble_type': 'blending'
+                    },
+                    filename=os.path.basename(output_path),
+                    metadata={
+                        "ensemble_type": "blending",
+                        "task_type": task_type,
+                        "ensemble_metrics": ensemble_metrics,
+                        "num_base_models": len(base_models)
+                    }
+                )
+            else:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                joblib.dump({
+                    'base_models': dict(base_models),
+                    'meta_model': meta_model,
+                    'ensemble_type': 'blending'
+                }, output_path)
         
         return {
             'status': 'success',
@@ -536,8 +574,20 @@ def train_ensemble_models(
     
     # Save model
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        joblib.dump(ensemble, output_path)
+        if ARTIFACT_STORE_AVAILABLE:
+            output_path = save_model_with_store(
+                model_data=ensemble,
+                filename=os.path.basename(output_path),
+                metadata={
+                    "ensemble_type": ensemble_type,
+                    "task_type": task_type,
+                    "ensemble_metrics": ensemble_metrics,
+                    "improvement_pct": float(improvement * 100)
+                }
+            )
+        else:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            joblib.dump(ensemble, output_path)
         print(f"💾 Ensemble model saved to: {output_path}")
     
     return {
