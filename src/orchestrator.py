@@ -1087,6 +1087,25 @@ Execute the complete workflow: profile → clean → convert types → encode �
             except Exception as e:
                 import traceback
                 error_traceback = traceback.format_exc()
+                error_str = str(e)
+                
+                # Handle rate limit errors with retry
+                if "rate_limit" in error_str.lower() or "429" in error_str or "quota" in error_str.lower() or "413" in error_str:
+                    # Extract retry delay if available
+                    retry_delay = 45  # Default wait time
+                    if "retry in" in error_str.lower():
+                        import re
+                        match = re.search(r'retry in (\d+)', error_str.lower())
+                        if match:
+                            retry_delay = int(match.group(1)) + 5  # Add buffer
+                    
+                    print(f"⏳ Rate limit hit. Waiting {retry_delay}s before retry...")
+                    time.sleep(retry_delay)
+                    
+                    # Retry the same iteration
+                    iteration -= 1  # Decrement so next loop retries
+                    continue
+                
                 print(f"❌ ERROR in analyze loop: {e}")
                 print(f"   Error type: {type(e).__name__}")
                 print(f"   Traceback:\n{error_traceback}")

@@ -40,6 +40,41 @@ current_profile = None
 last_agent_response = None  # Store last agent response for visualization extraction
 
 
+# Helper functions for Gradio 6.x message format
+def add_message(history, role, content):
+    """Add a message to history in Gradio 6.x format."""
+    if history is None:
+        history = []
+    history.append({"role": role, "content": content})
+    return history
+
+
+def add_user_message(history, content):
+    """Add a user message to history."""
+    return add_message(history, "user", content)
+
+
+def add_assistant_message(history, content):
+    """Add an assistant message to history."""
+    return add_message(history, "assistant", content)
+
+
+def update_last_assistant_message(history, content):
+    """Update the last assistant message in history."""
+    if history and len(history) > 0 and history[-1].get("role") == "assistant":
+        history[-1]["content"] = content
+    return history
+
+
+def get_last_user_content(history):
+    """Get the content of the last user message."""
+    if history:
+        for msg in reversed(history):
+            if msg.get("role") == "user":
+                return msg.get("content", "")
+    return ""
+
+
 def analyze_dataset(file, user_message, history):
     """Process uploaded dataset(s) and user message. Supports single or multiple file uploads."""
     global current_file, current_profile, last_agent_response
@@ -183,11 +218,8 @@ def analyze_dataset(file, user_message, history):
                     response += "- Generate predictions\n"
                     response += "- And much more!\n"
                     
-                    # Add or replace message in history
-                    if history and len(history) > 0 and history[-1][0] is None:
-                        history[-1] = (None, response)
-                    else:
-                        history.append((None, response))
+                    # Add assistant message to history
+                    history = add_assistant_message(history, response)
                     yield history, "", []
                     return
                 # If user uploaded file AND sent a message, don't return - continue to process the message
@@ -204,7 +236,8 @@ def analyze_dataset(file, user_message, history):
                 try:
                     # Show immediate processing message
                     print(f"🤖 AI Agent analyzing: {user_message}")
-                    history.append((user_message, "🤖 **AI Agent is thinking...**\n\n⏳ Analyzing your request and planning the workflow..."))
+                    history = add_user_message(history, user_message)
+                    history = add_assistant_message(history, "🤖 **AI Agent is thinking...**\n\n⏳ Analyzing your request and planning the workflow...")
                     yield history, "", []
                     
                     # Use the AI agent to process the request
@@ -337,11 +370,8 @@ def analyze_dataset(file, user_message, history):
                         response = f"⚠️ **AI Agent Status:** {agent_response.get('status', 'unknown')}\n\n"
                         response += f"{agent_response.get('message', agent_response.get('error', 'Unknown error'))}\n"
                     
-                    # Replace loading message safely
-                    if history and len(history) > 0 and history[-1][0] == user_message:
-                        history[-1] = (user_message, response)
-                    else:
-                        history.append((user_message, response))
+                    # Update the last assistant message with the response
+                    history = update_last_assistant_message(history, response)
                     
                     # Return plot paths for gallery (gr.Gallery expects list of file paths)
                     yield history, "", plots_paths if plots_paths else []
@@ -356,11 +386,8 @@ def analyze_dataset(file, user_message, history):
                     response += "💡 **Fallback Options:**\n"
                     response += "- Use the **Quick Train** feature on the right\n"
                     response += "- Try manual commands: `profile`, `quality`, `columns`\n"
-                    # Replace loading message safely
-                    if history and len(history) > 0 and history[-1][0] == user_message:
-                        history[-1] = (user_message, response)
-                    else:
-                        history.append((user_message, response))
+                    # Update the last assistant message with error
+                    history = update_last_assistant_message(history, response)
                     yield history, "", plots_paths if plots_paths else []
                     return
             else:
@@ -441,11 +468,9 @@ def analyze_dataset(file, user_message, history):
                     response += "• `help` - Show available commands\n\n"
                     response += "**Or use Quick Train** on the right to train models directly!\n"
                 
-                # Replace loading message safely
-                if history and len(history) > 0 and history[-1][0] == user_message:
-                    history[-1] = (user_message, response)
-                else:
-                    history.append((user_message, response))
+                # Add user message and assistant response
+                history = add_user_message(history, user_message)
+                history = add_assistant_message(history, response)
                 yield history, "", []
                 return
         
@@ -453,11 +478,9 @@ def analyze_dataset(file, user_message, history):
         if user_message and user_message.strip() and not current_file:
             response = "⚠️ **Please upload a dataset first!**\n\n"
             response += "Click the 'Upload Dataset' button above and select a CSV or Parquet file."
-            # Replace loading message safely
-            if history and len(history) > 0 and history[-1][0] == user_message:
-                history[-1] = (user_message, response)
-            else:
-                history.append((user_message, response))
+            # Add user message and assistant response
+            history = add_user_message(history, user_message)
+            history = add_assistant_message(history, response)
             yield history, "", []
             return
             
@@ -465,12 +488,13 @@ def analyze_dataset(file, user_message, history):
         error_msg = f"❌ **Error:** {str(e)}\n\n"
         error_msg += "**Traceback:**\n```\n" + traceback.format_exc() + "\n```"
         if user_message:
-            if history and history[-1][0] == user_message:
-                history[-1] = (user_message, error_msg)
-            else:
-                history.append((user_message, error_msg))
+            # Check if we already added the user message
+            last_user = get_last_user_content(history)
+            if last_user != user_message:
+                history = add_user_message(history, user_message)
+            history = add_assistant_message(history, error_msg)
         else:
-            history.append((None, error_msg))
+            history = add_assistant_message(history, error_msg)
         yield history, "", []
         return
     
