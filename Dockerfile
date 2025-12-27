@@ -1,6 +1,23 @@
 # Multi-stage build for Google Cloud Run
-# Stage 1: Build environment
-FROM python:3.13-slim as builder
+# Stage 1: Build React frontend
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production=false
+
+# Copy frontend source
+COPY frontend/ ./
+
+# Build production bundle
+RUN npm run build
+
+# Stage 2: Python dependencies
+FROM python:3.13-slim AS python-builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -18,7 +35,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Stage 2: Runtime environment
+# Stage 3: Production runtime
 FROM python:3.13-slim
 
 # Install runtime dependencies only
@@ -27,7 +44,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Set working directory
@@ -36,6 +53,9 @@ WORKDIR /app
 # Copy application code
 COPY src/ /app/src/
 COPY examples/ /app/examples/
+
+# Copy built frontend from Stage 1
+COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 
 # Create necessary directories for Cloud Run ephemeral storage
 RUN mkdir -p /tmp/data_science_agent \

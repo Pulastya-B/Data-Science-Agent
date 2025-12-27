@@ -45,6 +45,14 @@ temp/
 *.pkl
 *.joblib
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# API outputs (when running from src/api)
+src/api/outputs/
+
 # Data files (except examples)
 data/*.csv
 data/*.parquet

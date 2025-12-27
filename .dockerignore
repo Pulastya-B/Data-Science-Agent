@@ -23,8 +23,9 @@ temp/
 test_data/
 data/
 
-# Documentation and tests
-*.md
+# Documentation and tests (keep README for reference)
+DEPLOYMENT.md
+BIGQUERY_SCHEMAS.md
 tests/
 test_*.py
 check_*.py
@@ -48,6 +49,10 @@ Thumbs.db
 *.pkl
 *.joblib
 *.h5
+
+# Frontend dev dependencies (not needed in Docker build)
+frontend/node_modules/
+frontend/dist/
 *.pt
 *.pth
 
