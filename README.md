@@ -454,6 +454,7 @@ summary = create_executive_summary(
 
 ### **Environment Variables** (`.env`)
 
+#### Step 3: Test deployment
 ```bash
 # LLM Provider
 LLM_PROVIDER=groq               # "groq" or "gemini"
@@ -567,7 +568,61 @@ curl -X POST https://your-service-url/run \
 
 ## 🤝 Contributing
 
-Contributions welcome! Areas for improvement:
+Contributions are welcome! Here's how you can help:
+
+### Areas for Improvement
+1. **More Tools**: Time series forecasting, recommendation systems, reinforcement learning
+2. **Better Prompts**: Improve LLM reasoning quality and tool selection
+3. **Performance**: Optimize tool execution speed and memory usage
+4. **Documentation**: More examples, tutorials, and use cases
+5. **Testing**: Increase test coverage and add integration tests
+6. **Cloud Integration**: Help build cloud backend adapters
+
+### Contribution Guidelines
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for new functionality
+5. Update documentation
+6. Commit changes (`git commit -m 'Add amazing feature'`)
+7. Push to branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+### Code Standards
+- **Style**: Follow PEP 8, use Black for formatting
+- **Type Hints**: Add type annotations to all functions
+- **Documentation**: Docstrings for all public functions
+- **Testing**: Maintain >80% test coverage
+- **Tools**: Each tool should be independent and composable
+
+## � Troubleshooting
+
+### Common Issues
+
+#### 1. API Key Errors
+```bash
+# Error: "API key must be provided"
+# Solution: Set environment variable
+export GROQ_API_KEY=your_key_here
+# OR
+export GOOGLE_API_KEY=your_key_here
+```
+
+#### 2. Rate Limit Errors
+```bash
+# Error: "Rate limit exceeded"
+# Solution: Switch provider or adjust rate limiting
+export LLM_PROVIDER=gemini  # Has different rate limits
+```
+
+#### 3. Token Limit Errors
+```bash
+# Error: "Request too large for model"
+# Solution: Token optimization is automatic, but you can:
+# - Use smaller datasets for initial testing
+# - Reduce max_iterations parameter
+# - Clear cache: python src/cli.py clear-cache
+```
 
 1. **New Tools**: Time series forecasting, NLP preprocessing, image augmentation
 2. **Cloud Backends**: AWS, Azure support
