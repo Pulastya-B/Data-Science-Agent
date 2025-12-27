@@ -11,9 +11,18 @@ import sys
 import os
 import joblib
 import json
+import tempfile
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import artifact store
+try:
+    from storage.helpers import save_model_with_store
+    ARTIFACT_STORE_AVAILABLE = True
+except ImportError:
+    ARTIFACT_STORE_AVAILABLE = False
+    print("⚠️  Artifact store not available, using local paths")
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression, Ridge, Lasso
@@ -153,14 +162,32 @@ def train_baseline_models(file_path: str, target_col: str,
                     }
                 }
                 
-                # Save model
-                model_path = f"./outputs/models/{model_name}.pkl"
-                Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-                joblib.dump({
-                    "model": model,
-                    "imputer": imputer,
-                    "feature_names": numeric_cols
-                }, model_path)
+                # Save model using artifact store
+                if ARTIFACT_STORE_AVAILABLE:
+                    model_path = save_model_with_store(
+                        model_data={
+                            "model": model,
+                            "imputer": imputer,
+                            "feature_names": numeric_cols
+                        },
+                        filename=f"{model_name}.pkl",
+                        metadata={
+                            "model_name": model_name,
+                            "task_type": "classification",
+                            "train_accuracy": float(accuracy_score(y_train, y_pred_train)),
+                            "test_accuracy": float(accuracy_score(y_test, y_pred_test)),
+                            "features": numeric_cols
+                        }
+                    )
+                else:
+                    model_path = f"./outputs/models/{model_name}.pkl"
+                    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+                    joblib.dump({
+                        "model": model,
+                        "imputer": imputer,
+                        "feature_names": numeric_cols
+                    }, model_path)
+                
                 results["models"][model_name]["model_path"] = model_path
                 
             except Exception as e:
@@ -204,14 +231,32 @@ def train_baseline_models(file_path: str, target_col: str,
                     }
                 }
                 
-                # Save model
-                model_path = f"./outputs/models/{model_name}.pkl"
-                Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-                joblib.dump({
-                    "model": model,
-                    "imputer": imputer,
-                    "feature_names": numeric_cols
-                }, model_path)
+                # Save model using artifact store
+                if ARTIFACT_STORE_AVAILABLE:
+                    model_path = save_model_with_store(
+                        model_data={
+                            "model": model,
+                            "imputer": imputer,
+                            "feature_names": numeric_cols
+                        },
+                        filename=f"{model_name}.pkl",
+                        metadata={
+                            "model_name": model_name,
+                            "task_type": "regression",
+                            "train_r2": float(r2_score(y_train, y_pred_train)),
+                            "test_r2": float(r2_score(y_test, y_pred_test)),
+                            "features": numeric_cols
+                        }
+                    )
+                else:
+                    model_path = f"./outputs/models/{model_name}.pkl"
+                    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+                    joblib.dump({
+                        "model": model,
+                        "imputer": imputer,
+                        "feature_names": numeric_cols
+                    }, model_path)
+                
                 results["models"][model_name]["model_path"] = model_path
                 
             except Exception as e:

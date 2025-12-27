@@ -39,14 +39,27 @@ ENV/
 # Cache & Outputs
 cache_db/*.db
 cache_db/*.db-journal
+cache_db/
 outputs/
+temp/
 *.pkl
 *.joblib
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# API outputs (when running from src/api)
+src/api/outputs/
 
 # Data files (except examples)
 data/*.csv
 data/*.parquet
 !data/.gitkeep
+
+# Cloud Run URL
+.cloud_run_url
 
 # Jupyter
 .ipynb_checkpoints/

@@ -1,18 +1,28 @@
 """
 FastAPI Application for Google Cloud Run
 Thin HTTP wrapper around DataScienceCopilot - No logic changes, just API exposure.
+Serves React frontend and provides streaming chat API.
 """
 
 import os
 import sys
 import tempfile
 import shutil
+import json
+import asyncio
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
+from dotenv import load_dotenv
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse
+# Load environment variables from .env file
+load_dotenv()
+
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Add src to path for imports
@@ -28,7 +38,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Data Science Agent API",
     description="Cloud Run wrapper for autonomous data science workflows",
-    version="1.0.0"
+    version="2.0.0"
+)
+
+# CORS middleware for frontend development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Initialize agent once (singleton pattern for stateless service)
@@ -84,6 +103,222 @@ class AnalysisRequest(BaseModel):
     """Request model for analysis endpoint (JSON body)."""
     task_description: str
     target_col: Optional[str] = None
+    use_cache: bool = True
+    max_iterations: int = 20
+
+
+class ChatMessage(BaseModel):
+    """Single chat message."""
+    role: str  # 'user' or 'assistant'
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat endpoint."""
+    messages: List[ChatMessage]
+    file_path: Optional[str] = None
+    stream: bool = True
+
+
+# ==================== CHAT API ====================
+
+@app.post("/api/chat")
+async def chat_completion(request: ChatRequest):
+    """
+    Chat completion endpoint - connects frontend to Data Science Agent.
+    Supports streaming responses for real-time updates.
+    """
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    
+    # Get the last user message
+    user_messages = [m for m in request.messages if m.role == 'user']
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user message provided")
+    
+    last_message = user_messages[-1].content
+    logger.info(f"Chat request: {last_message[:100]}...")
+    
+    async def generate_response():
+        """Stream response chunks."""
+        try:
+            # Check if this is a data science task with file
+            if request.file_path and os.path.exists(request.file_path):
+                # Run the agent with the file
+                result = agent.analyze(
+                    file_path=request.file_path,
+                    task_description=last_message,
+                    max_iterations=10
+                )
+                
+                # Format response with HTML reports embedded
+                if result.get("status") == "success":
+                    response_text = f"## Analysis Complete\n\n"
+                    response_text += f"**Summary:** {result.get('summary', 'Analysis completed successfully.')}\n\n"
+                    
+                    if result.get("tools_used"):
+                        response_text += f"**Tools Used:** {', '.join(result['tools_used'])}\n\n"
+                    
+                    if result.get("insights"):
+                        response_text += f"### Insights\n{result['insights']}\n\n"
+                    
+                    # Stream the text response first
+                    for i in range(0, len(response_text), 50):
+                        chunk = response_text[i:i+50]
+                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                        await asyncio.sleep(0.02)
+                    
+                    # Check for HTML reports and send them as complete chunks
+                    html_reports = []
+                    
+                    # Get absolute paths to check multiple possible output directories
+                    base_dir = Path(__file__).parent.parent.parent  # Project root
+                    api_dir = Path(__file__).parent  # src/api directory
+                    
+                    # Check both possible report locations
+                    possible_dirs = [
+                        base_dir / "outputs" / "reports",  # Project root outputs
+                        api_dir / "outputs" / "reports",   # src/api outputs (where agent actually saves)
+                    ]
+                    
+                    logger.info(f"Checking for reports in multiple locations:")
+                    for reports_dir in possible_dirs:
+                        logger.info(f"  - {reports_dir} (exists: {reports_dir.exists()})")
+                    
+                    # Find all HTML files from all locations
+                    all_html_files = []
+                    for reports_dir in possible_dirs:
+                        if reports_dir.exists():
+                            html_files = list(reports_dir.glob('*.html'))
+                            all_html_files.extend(html_files)
+                            logger.info(f"  Found {len(html_files)} HTML files in {reports_dir}")
+                    
+                    if all_html_files:
+                        # Sort by modification time (most recent first)
+                        all_html_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                        logger.info(f"Total {len(all_html_files)} HTML report(s) found: {[f.name for f in all_html_files]}")
+                        
+                        # Load the most recent reports (limit to 2 to avoid huge payloads)
+                        for html_file in all_html_files[:2]:
+                            try:
+                                # Check if file was created/modified in last 5 minutes (likely from this run)
+                                file_age = time.time() - html_file.stat().st_mtime
+                                if file_age < 300:  # 5 minutes
+                                    with open(html_file, 'r', encoding='utf-8') as f:
+                                        html_content = f.read()
+                                        report_name = html_file.stem.replace('_', ' ').title()
+                                        html_reports.append((report_name, html_content))
+                                        logger.info(f"✅ Loaded {html_file.name} ({len(html_content)} bytes, {file_age:.1f}s old)")
+                                else:
+                                    logger.info(f"⏭️  Skipping {html_file.name} (too old: {file_age:.1f}s)")
+                            except Exception as e:
+                                logger.error(f"Error reading {html_file}: {e}")
+                    
+                    logger.info(f"Total HTML reports to send: {len(html_reports)}")
+                    
+                    # Send HTML reports as complete chunks with special marker
+                    if html_reports:
+                        yield f"data: {json.dumps({'content': '\\n---\\n\\n', 'done': False})}\n\n"
+                        
+                        for report_name, html_content in html_reports:
+                            # Send report title
+                            yield f"data: {json.dumps({'content': f'### {report_name}\\n\\n', 'done': False})}\n\n"
+                            
+                            # Send entire HTML report as ONE chunk with special html_report field
+                            logger.info(f"Sending {report_name} ({len(html_content)} bytes)")
+                            yield f"data: {json.dumps({'html_report': html_content, 'done': False})}\n\n"
+                            await asyncio.sleep(0.1)
+                    else:
+                        logger.warning("No HTML reports found to send!")
+                else:
+                    response_text = f"Analysis encountered an issue: {result.get('error', 'Unknown error')}"
+                    
+                    # Stream error message
+                    for i in range(0, len(response_text), 50):
+                        chunk = response_text[i:i+50]
+                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                        await asyncio.sleep(0.02)
+                
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+            else:
+                # Regular chat - use the agent's chat method
+                response = agent.chat(last_message)
+                
+                # Stream in chunks for smooth UI
+                for i in range(0, len(response), 30):
+                    chunk = response[i:i+30]
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                    await asyncio.sleep(0.01)
+                
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Chat error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+    
+    if request.stream:
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+    else:
+        # Non-streaming response
+        try:
+            if request.file_path and os.path.exists(request.file_path):
+                result = agent.analyze(
+                    file_path=request.file_path,
+                    task_description=last_message,
+                    max_iterations=10
+                )
+                return JSONResponse(content={"success": True, "result": result})
+            else:
+                response = agent.chat(last_message)
+                return JSONResponse(content={"success": True, "content": response})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Upload a file for analysis.
+    Returns a temporary file path that can be used in subsequent chat messages.
+    """
+    filename = file.filename.lower()
+    if not (filename.endswith('.csv') or filename.endswith('.parquet') or filename.endswith('.xlsx')):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file format. Supported: CSV, Parquet, Excel"
+        )
+    
+    temp_dir = Path("/tmp") / "data_science_agent" / "uploads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    temp_file_path = temp_dir / file.filename
+    
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        file_size = os.path.getsize(temp_file_path)
+        logger.info(f"File uploaded: {file.filename} ({file_size} bytes)")
+        
+        return JSONResponse(content={
+            "success": True,
+            "file_path": str(temp_file_path),
+            "filename": file.filename,
+            "size": file_size
+        })
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== EXISTING ENDPOINTS ====================
     use_cache: bool = True
     max_iterations: int = 20
 
@@ -314,6 +549,29 @@ async def general_exception_handler(request, exc):
             "error_type": type(exc).__name__
         }
     )
+
+
+# ==================== STATIC FILE SERVING ====================
+# Serve React frontend build in production
+frontend_build_path = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if frontend_build_path.exists():
+    # Serve static assets
+    app.mount("/assets", StaticFiles(directory=frontend_build_path / "assets"), name="assets")
+    
+    # Serve index.html for SPA routing
+    from fastapi.responses import FileResponse
+    
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve React SPA - catch-all route."""
+        # Don't serve for API routes
+        if full_path.startswith("api/") or full_path in ["health", "tools", "run", "profile"]:
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        index_file = frontend_build_path / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend not built")
 
 
 # Cloud Run listens on PORT environment variable

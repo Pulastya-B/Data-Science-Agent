@@ -148,6 +148,20 @@ from .eda_reports import (
     generate_combined_eda_report
 )
 
+# Code Interpreter (2) - NEW PHASE 2 - CRITICAL for True AI Agent
+from .code_interpreter import (
+    execute_python_code,
+    execute_code_from_file
+)
+
+# Cloud Data Sources (4) - NEW: BigQuery Integration
+from .cloud_data_sources import (
+    load_bigquery_table,
+    write_bigquery_table,
+    profile_bigquery_table,
+    query_bigquery
+)
+
 from .tools_registry import TOOLS, get_tool_by_name, get_all_tool_names
 
 from tools.enhanced_feature_engineering import (
@@ -269,6 +283,16 @@ __all__ = [
     "generate_sweetviz_report",
     "generate_ydata_profiling_report",
     "generate_combined_eda_report",
+    
+    # Code Interpreter (2) - NEW PHASE 2 - CRITICAL for True AI Agent
+    "execute_python_code",
+    "execute_code_from_file",
+    
+    # Cloud Data Sources (4) - NEW: BigQuery Integration
+    "load_bigquery_table",
+    "write_bigquery_table",
+    "profile_bigquery_table",
+    "query_bigquery",
     
     # Enhanced Feature Engineering (4) - NEW
     "create_ratio_features",

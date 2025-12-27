@@ -1,0 +1,70 @@
+# Python cache and environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Development files
+.git/
+.gitignore
+.env
+.env.local
+*.log
+
+# Output directories (not needed in container)
+outputs/
+cache_db/
+temp/
+test_data/
+data/
+
+# Documentation and tests (keep README for reference)
+DEPLOYMENT.md
+BIGQUERY_SCHEMAS.md
+tests/
+test_*.py
+check_*.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Large model files (if any)
+*.pkl
+*.joblib
+*.h5
+
+# Frontend dev dependencies (not needed in Docker build)
+frontend/node_modules/
+frontend/dist/
+*.pt
+*.pth
+
+# Documentation
+docs/
+PHASE*.md
+PROJECT*.md
+TOKEN*.md
+TOOL*.md
+FEATURE*.md
+IMPLEMENTATION*.md
+MIGRATION*.md
+EDA_REPORTS*.md
+GITHUB*.md
+BIGQUERY*.md
